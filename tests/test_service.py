@@ -110,6 +110,52 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(app.store.recent()[0]["speaker"], "对方 1")
         self.assertEqual(self.service.error, "")
 
+    def test_overlapping_audio_is_transcribed_per_input_and_displayed_separately(self):
+        barrier = threading.Barrier(2)
+        host = MagicMock()
+        host.__enter__.return_value = host
+        host.get_device_info_by_index.side_effect = lambda device: {
+            "isLoopbackDevice": device == 7, "defaultSampleRate":16000, "maxInputChannels":1}
+
+        def open_stream(**kwargs):
+            context, stream = MagicMock(), MagicMock()
+            context.__enter__.return_value = stream
+            count = 0
+            value = .02 if kwargs["input_device_index"] == 7 else .04
+            def read(*args, **options):
+                nonlocal count
+                barrier.wait(timeout=3)
+                count += 1
+                if count == 5:
+                    self.service.stop.set()
+                return np.full(1600, value, dtype=np.float32).tobytes()
+            stream.read.side_effect = read
+            return context
+
+        host.open.side_effect = open_stream
+        seen = []
+        def recognize(clip, preview=False):
+            value = round(float(np.mean(clip)), 2)
+            seen.append(value)
+            return [SimpleNamespace(text="My own words" if value == .04 else "Their words", no_speech_prob=0)]
+        tracker = MagicMock()
+        tracker.session = "overlap"
+        tracker.label_segments.side_effect = lambda clip, segments: [
+            {"source":"remote:overlap:1", "text":segments[0].text, "offset":0}]
+        with patch.object(self.service, "load_models"), patch.object(self.service, "transcribe", side_effect=recognize), \
+                patch.object(self.service, "translate", return_value="独立译文"), \
+                patch.object(app, "AudioHost", return_value=host), patch.object(app, "VoiceTracker", return_value=tracker):
+            self.service.run(7, 8)
+            self.service.translation_jobs.join()
+        self.assertEqual(self.service.error, "")
+        self.assertCountEqual(seen, [.02, .04])
+        rows = app.store.recent()
+        self.assertEqual({row["source"]:row["en"] for row in rows},
+                         {"microphone":"My own words", "remote:overlap:1":"Their words"})
+        paragraphs = app.state()["paragraphs"]
+        self.assertEqual(len(paragraphs), 2)
+        self.assertCountEqual([p["en"] for p in paragraphs], ["My own words", "Their words"])
+
     def test_english_is_saved_before_translation_and_patch_reaches_client(self):
         entered, release = threading.Event(), threading.Event()
 

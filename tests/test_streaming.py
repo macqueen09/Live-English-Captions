@@ -37,6 +37,19 @@ class StreamingTests(unittest.TestCase):
 
 
 class LayoutTests(unittest.TestCase):
+    def test_simultaneous_microphone_and_output_stay_separate(self):
+        layout = LiveParagraphs()
+        previews = [{"utterance":"mic", "source":"microphone", "speaker":"Me", "en":"My own words"},
+                    {"utterance":"ear", "source":"output", "speaker":"Other", "en":"Their words"}]
+        before = layout.apply([], previews)
+        self.assertEqual([p["en"] for p in before], ["My own words", "Their words"])
+        microphone = self.row(1, "My own words", token="mic")
+        remote = self.row(2, "Their words", "remote:session:1", "ear")
+        microphone["timestamp"] = remote["timestamp"]
+        after = layout.apply([microphone, remote], [])
+        self.assertEqual([p["en"] for p in after], ["My own words", "Their words"])
+        self.assertEqual([p["source"] for p in after], ["microphone", "remote:session:1"])
+
     def row(self, row_id, text, source="microphone", token=None):
         return {"id":row_id, "en":text, "zh":"", "speaker":source, "source":source,
                 "capture_source":"microphone" if source=="microphone" else "output", "utterance":token,

@@ -28,6 +28,7 @@ from inference import AdaptiveModel
 from speech import MODEL_NAME as SPEECH_NAME, MODEL_DIR as SPEECH_DIR
 from streaming import StableEnglish, reconcile_groups
 from caption_layout import LiveParagraphs
+from audio_devices import preferred_microphone
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Live English Captions", version=VERSION)
@@ -507,7 +508,8 @@ def devices():
                 "default": default,
                 "devices": outputs,
                 "microphones": microphones,
-                "default_microphone": int(wasapi["defaultInputDevice"]),
+                "default_microphone": preferred_microphone(microphones, int(wasapi["defaultInputDevice"]),
+                    next((item["name"] for item in outputs if item["id"] == default), "")),
             }
     except Exception as exc:
         raise HTTPException(500, str(exc))
