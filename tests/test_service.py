@@ -21,6 +21,7 @@ class ServiceTests(unittest.TestCase):
         self.service.stop.set()
         if self.service.thread:
             self.service.thread.join(timeout=2)
+        self.service.translation_jobs.join()
         self.patch.stop()
         self.store_patch.stop()
         self.directory.cleanup()
@@ -103,9 +104,54 @@ class ServiceTests(unittest.TestCase):
             patch.object(app, "VoiceTracker", return_value=tracker),
         ):
             self.service.run(7)
+            self.service.translation_jobs.join()
         self.assertEqual(app.store.recent()[0]["en"], "Final words")
         self.assertEqual(app.store.recent()[0]["speaker"], "对方 1")
         self.assertEqual(self.service.error, "")
+
+    def test_english_is_saved_before_translation_and_patch_reaches_client(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def translate(text):
+            entered.set()
+            release.wait(timeout=2)
+            return "后来补上中文"
+
+        with patch.object(self.service, "translate", side_effect=translate):
+            self.service.ensure_translation_worker()
+            self.service.emit_final("English first", "microphone", None)
+            try:
+                self.assertTrue(entered.wait(timeout=1))
+                first = app.state()
+                self.assertEqual(first["rows"][0]["en"], "English first")
+                self.assertEqual(first["rows"][0]["zh"], "")
+                self.assertEqual(app.store.recent()[0]["zh"], "")
+            finally:
+                release.set()
+            self.service.translation_jobs.join()
+        patched = app.state(after=1, revision=first["revision"])
+        self.assertEqual(patched["rows"], [])
+        self.assertEqual(patched["updates"][0]["zh"], "后来补上中文")
+        self.assertEqual(app.store.recent()[0]["zh"], "后来补上中文")
+
+    def test_live_waiter_wakes_for_new_english(self):
+        received = []
+        revision = self.service.revision
+        client = threading.Thread(target=lambda: received.append(app.live(after=0, revision=revision)))
+        client.start()
+        self.service.emit("Wake the waiting screen", "中文")
+        client.join(timeout=1)
+        self.assertFalse(client.is_alive())
+        self.assertEqual(received[0]["rows"][0]["en"], "Wake the waiting screen")
+
+    def test_restart_recovers_pending_chinese_without_duplicate_english(self):
+        app.store.append("Previously saved English", "", "microphone")
+        with patch.object(self.service, "translate", return_value="重启后翻译"):
+            self.service.ensure_translation_worker()
+            self.service.translation_jobs.join()
+        rows = app.store.recent()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["zh"], "重启后翻译")
 
 
 if __name__ == "__main__":

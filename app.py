@@ -22,6 +22,7 @@ from uuid import uuid4
 from speakers import VoiceTracker, MODEL_NAME
 from translation import ChineseTranslator, MODEL_DIR, ENGINE
 from version import VERSION
+from inference import AdaptiveModel
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Live English Captions", version=VERSION)
@@ -89,7 +90,15 @@ class StartRequest(BaseModel):
 
 class Service:
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        self.changed = threading.Condition(self.lock)
+        self.revision = 0
+        self.previews = {}
+        self.preview_jobs = {}
+        self.active_utterances = {}
+        self.asr_runtime = None
+        self.translation_jobs = queue.Queue()
+        self.translation_thread = None
         self.stop = threading.Event()
         self.thread = None
         self.status = "尚未开始"
@@ -109,12 +118,79 @@ class Service:
         with self.lock:
             row = store.append(english, chinese, source, timestamp)
             self.sequence = row["id"]
+            self.revision += 1
+            row["revision"] = self.revision
             self.rows.append(row)
+            self.changed.notify_all()
+            return row
+
+    def notify(self):
+        with self.changed:
+            self.revision += 1
+            self.changed.notify_all()
+
+    def hardware(self):
+        translation = self.translator.runtime if self.translator else None
+        return {
+            "asr": self.asr_runtime.label if self.asr_runtime else "--",
+            "translation": translation.label if translation else "--",
+            "speaker": "CPU",
+            "fallback": {name: runtime.reason for name, runtime in
+                         (("asr", self.asr_runtime), ("translation", translation)) if runtime and runtime.reason},
+        }
+
+    def ensure_translation_worker(self):
+        with self.lock:
+            if self.translation_thread and self.translation_thread.is_alive():
+                return
+            for row in store.pending_translations():
+                self.translation_jobs.put((row["id"], row["en"]))
+            self.translation_thread = threading.Thread(target=self.translate_pending, daemon=True)
+            self.translation_thread.start()
+
+    def translate_pending(self):
+        while True:
+            row_id, text = self.translation_jobs.get()
+            try:
+                try:
+                    chinese = self.translate(text)
+                except Exception:
+                    chinese = "［翻译暂不可用，请参考英文原文］"
+                with self.lock:
+                    updated = store.update_translation(row_id, chinese)
+                    if updated:
+                        self.revision += 1
+                        updated["revision"] = self.revision
+                        for index, row in enumerate(self.rows):
+                            if row["id"] == row_id:
+                                self.rows[index] = updated
+                                break
+                        self.changed.notify_all()
+            finally:
+                self.translation_jobs.task_done()
+
+    def emit_final(self, english, source, timestamp):
+        row = self.emit(english, "", source, timestamp)
+        self.translation_jobs.put((row["id"], english))
+
+    def transcribe(self, clip, preview=False):
+        def infer(model):
+            segments, _ = model.transcribe(
+                clip, language="en", beam_size=1, vad_filter=True,
+                condition_on_previous_text=False, word_timestamps=not preview,
+            )
+            return list(segments)
+        if self.asr_runtime:
+            result = self.asr_runtime.run(infer)
+            self.model = self.asr_runtime.model
+            return result
+        return infer(self.model)
 
     def translate(self, text):
         with self.translation_lock:
             if self.translator is None:
-                self.translator = ChineseTranslator(ROOT / "models" / MODEL_DIR)
+                self.translator = ChineseTranslator(ROOT / "models" / MODEL_DIR, on_change=self.notify)
+                self.notify()
             return self.translator.translate(text)
 
     def load_models(self):
@@ -125,10 +201,16 @@ class Service:
             model_path = ROOT / "models" / "whisper-base.en"
             if not (model_path / "model.bin").exists():
                 raise RuntimeError("语音模型未安装，请先运行 setup.ps1。")
-            self.model = WhisperModel(
-                str(model_path), device="cpu", compute_type="int8"
+            self.asr_runtime = AdaptiveModel(
+                lambda device, compute: WhisperModel(str(model_path), device=device, compute_type=compute),
+                on_change=self.notify,
             )
-        self.translate("Hello")
+            # Force a real encoder call: CUDA libraries load lazily, even if model loading succeeds.
+            self.asr_runtime.run(lambda model: list(model.transcribe(
+                np.zeros(16000, dtype=np.float32), language="en", beam_size=1, vad_filter=False,
+            )[0]))
+            self.model = self.asr_runtime.model
+            self.notify()
 
     def run(self, device, microphone=None):
         chunks = queue.Queue(maxsize=64)
@@ -153,17 +235,25 @@ class Service:
                         frames_per_buffer=block,
                     ) as stream:
                         frames, silence, duration = [], 0, 0
+                        last_preview = 0
+                        utterance = None
                         started = None
                         preroll = deque(maxlen=3)
 
-                        def enqueue():
+                        def audio_clip():
                             clip = np.concatenate(frames)
                             divisor = math.gcd(rate, 16000)
                             clip = resample_poly(
                                 clip, 16000 // divisor, rate // divisor
                             ).astype(np.float32)
+                            return clip
+
+                        def enqueue():
+                            with self.lock:
+                                self.preview_jobs.pop(source, None)
+                                self.active_utterances[source] = None
                             try:
-                                chunks.put_nowait((clip, source, started))
+                                chunks.put_nowait((audio_clip(), source, started, utterance))
                             except queue.Full:
                                 raise RuntimeError(
                                     "处理速度跟不上，音频积压已满，已停止捕获。请缩短通话或改用更快模型。"
@@ -189,12 +279,21 @@ class Service:
                                 frames.extend(preroll)
                                 preroll.clear()
                                 started = datetime.now(CST)
+                                utterance = uuid4().hex
+                                with self.lock:
+                                    self.active_utterances[source] = utterance
                             frames.append(mono)
                             duration += 0.1
                             silence = 0 if voiced else silence + 0.1
                             if (silence >= 0.6 and duration >= 0.6) or duration >= 7:
                                 enqueue()
                                 frames, silence, duration = [], 0, 0
+                                last_preview = 0
+                            elif duration - last_preview >= (1.0 if self.asr_runtime and self.asr_runtime.device == "cuda" else 1.8):
+                                last_preview = duration
+                                with self.lock:
+                                    # Coalesce previews: obsolete snapshots never build up behind final audio.
+                                    self.preview_jobs[source] = (audio_clip(), source, started, utterance)
                         if frames and duration >= 0.3:
                             enqueue()
             except Exception as exc:
@@ -208,12 +307,14 @@ class Service:
             if self.stop.is_set():
                 return
             self.tracker = VoiceTracker(ROOT / "models" / MODEL_NAME, uuid4().hex[:8])
+            self.ensure_translation_worker()
             listening = (
                 "正在监听耳机和麦克风"
                 if microphone is not None
                 else "正在监听耳机播放音频"
             )
             self.status = listening
+            self.notify()
             sources = [(device, "output")]
             if microphone is not None:
                 sources.append((microphone, "microphone"))
@@ -229,38 +330,51 @@ class Service:
                 or not chunks.empty()
             ):
                 try:
-                    clip, source, timestamp = chunks.get(timeout=0.2)
+                    clip, source, timestamp, utterance = chunks.get_nowait()
+                    preview = False
                 except queue.Empty:
-                    continue
+                    with self.lock:
+                        source = next(iter(self.preview_jobs), None)
+                        job = self.preview_jobs.pop(source) if source else None
+                    if job is None:
+                        self.stop.wait(0.05) if not self.stop.is_set() else threading.Event().wait(0.02)
+                        continue
+                    clip, source, timestamp, utterance = job
+                    preview = True
                 self.status = (
                     "停止捕获，正在保存剩余对话…"
                     if self.stop.is_set()
-                    else "正在识别和翻译…"
+                    else "正在识别英文…"
                 )
-                segments, _ = self.model.transcribe(
-                    clip,
-                    language="en",
-                    beam_size=1,
-                    vad_filter=True,
-                    condition_on_previous_text=False,
-                    word_timestamps=True,
-                )
-                segments = list(segments)
+                segments = self.transcribe(clip, preview=preview)
+                if preview:
+                    text = " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.6).strip()
+                    with self.lock:
+                        if text and self.active_utterances.get(source) == utterance:
+                            before = self.previews.get(source, {})
+                            if before.get("en") != text or before.get("utterance") != utterance:
+                                self.previews[source] = {"source": source, "utterance": utterance, "en": text,
+                                    "speaker": "我（麦克风）" if source == "microphone" else "对方（实时预览）"}
+                                self.notify()
+                    continue
                 if source == "microphone":
                     text = " ".join(
                         s.text.strip() for s in segments if s.no_speech_prob < 0.6
                     ).strip()
                     if text:
-                        self.emit(text, self.translate(text), source, timestamp)
+                        self.emit_final(text, source, timestamp)
                 else:
                     for group in self.tracker.label_segments(clip, segments):
                         if group["text"]:
-                            self.emit(
+                            self.emit_final(
                                 group["text"],
-                                self.translate(group["text"]),
                                 group["source"],
                                 timestamp + timedelta(seconds=group["offset"]),
                             )
+                with self.lock:
+                    if self.previews.get(source, {}).get("utterance") == utterance:
+                        self.previews.pop(source, None)
+                        self.notify()
                 if not self.stop.is_set():
                     self.status = listening
         except Exception as exc:
@@ -274,6 +388,11 @@ class Service:
             self.level = 0
             self.mic_level = 0
             self.status = "已停止" if not self.error else "启动或处理失败"
+            with self.lock:
+                self.previews.clear()
+                self.preview_jobs.clear()
+                self.active_utterances.clear()
+                self.notify()
 
 
 service = Service()
@@ -348,20 +467,27 @@ def start(request: StartRequest):
             target=service.run, args=(request.device, request.microphone), daemon=True
         )
         service.thread.start()
+        service.notify()
     return {"ok": True}
 
 
 @app.post("/api/stop")
 def stop():
     service.stop.set()
+    service.notify()
     return {"ok": True}
 
 
 @app.get("/api/state")
-def state(after: int = 0):
+def state(after: int = 0, revision: int = -1):
     with service.lock:
         return dict(
             version=VERSION,
+            revision=service.revision,
+            hardware=service.hardware(),
+            partials=list(service.previews.values()),
+            pending_translations=service.translation_jobs.unfinished_tasks,
+            updates=[r for r in service.rows if r["id"] <= after and r.get("revision", 0) > revision] if revision >= 0 else [],
             translation_engine=ENGINE,
             status=service.status,
             error=service.error,
@@ -372,6 +498,15 @@ def state(after: int = 0):
             if after
             else list(service.rows)[-12:],
         )
+
+
+@app.get("/api/live")
+def live(after: int = 0, revision: int = -1):
+    # Long polling wakes on changes rather than repeatedly rebuilding either UI.
+    with service.changed:
+        if revision >= 0 and revision == service.revision:
+            service.changed.wait_for(lambda: service.revision != revision, timeout=15)
+        return state(after, revision)
 
 
 @app.get("/api/history/dates")

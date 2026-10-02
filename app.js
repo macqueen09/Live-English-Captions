@@ -5,6 +5,7 @@ let lastId = 0,
   historyBefore = null,
   currentTab = 'live';
 let followLatest = true;
+let liveRevision = -1;
 let selected = {
     term: '',
     zh: '',
@@ -60,11 +61,25 @@ function caption(r) {
   spoken.className = 'spoken';
   spoken.textContent = r.en;
   english.append(spoken, head);
-  e.append(english, node('zh', r.zh));
+  const chinese = node('zh', '');
+  const translation = document.createElement('span');
+  translation.dataset.translationId = r.id;
+  translation.textContent = r.zh || '中文稍后补充…';
+  chinese.append(translation);
+  e.append(english, chinese);
   return e
 }
 
+function freshText(text) {
+  const span = document.createElement('span');
+  span.textContent = text;
+  span.className = 'caption-new';
+  setTimeout(() => span.classList.remove('caption-new'), 4500);
+  return span;
+}
+
 function appendCaption(container, row) {
+  const live = container === $('rows');
   const last = container.lastElementChild;
   const previous = last?.captionRows?.at(-1);
   const seconds = previous ? (Date.parse(row.timestamp) - Date.parse(previous.timestamp)) / 1000 : Infinity;
@@ -73,12 +88,62 @@ function appendCaption(container, row) {
   if (previous && previous.source === row.source && previous.speaker === row.speaker &&
     seconds >= 0 && seconds <= 12 && currentText.length + row.en.length < 380) {
     // Append text nodes so an existing selection is never replaced.
-    english.append(document.createTextNode(' ' + row.en));
-    last.querySelector('.zh').append(document.createTextNode(' ' + row.zh));
+    english.append(live ? freshText(' ' + row.en) : document.createTextNode(' ' + row.en));
+    const translation = document.createElement('span');
+    translation.dataset.translationId = row.id;
+    translation.append(live && row.zh ? freshText(' ' + row.zh) : document.createTextNode(' ' + (row.zh || '中文稍后补充…')));
+    last.querySelector('.zh').append(translation);
     last.captionRows.push(row);
     return;
   }
-  container.append(caption(row));
+  const item = caption(row);
+  if (live) {
+    item.querySelector('.spoken').replaceChildren(freshText(row.en));
+    if (row.zh) item.querySelector('[data-translation-id]').replaceChildren(freshText(row.zh));
+  }
+  container.append(item);
+}
+
+function updateTranslation(row) {
+  const span = $('rows').querySelector(`[data-translation-id="${row.id}"]`);
+  if (span && row.zh !== span.dataset.zh) {
+    const first = span.parentElement.firstElementChild === span;
+    span.replaceChildren(freshText((first ? '' : ' ') + row.zh));
+    span.dataset.zh = row.zh;
+  }
+  for (const item of liveRows) if (item.id === row.id) Object.assign(item, row);
+  for (const article of $('rows').children)
+    for (const item of article.captionRows || []) if (item.id === row.id) Object.assign(item, row);
+}
+
+function updatePreviews(partials) {
+  const container = $('partial-rows');
+  const active = new Set(partials.map(p => p.source));
+  for (const child of [...container.children]) if (!active.has(child.dataset.source)) child.remove();
+  for (const preview of partials) {
+    let article = [...container.children].find(el => el.dataset.source === preview.source);
+    if (!article) {
+      article = document.createElement('article');
+      article.dataset.source = preview.source;
+      article.className = 'partial-caption';
+      const en = node('en', '');
+      const spoken = document.createElement('span');
+      spoken.className = 'spoken';
+      en.append(spoken, node('time', preview.speaker + ' · 实时预览'));
+      article.append(en);
+      container.append(article);
+    }
+    const spoken = article.querySelector('.spoken');
+    const before = spoken.textContent;
+    if (before === preview.en) continue;
+    if (window.getSelection()?.anchorNode && spoken.contains(window.getSelection().anchorNode) && selectionActive()) continue;
+    if (preview.en.startsWith(before)) spoken.append(freshText(preview.en.slice(before.length)));
+    else {
+      let common = 0;
+      while (common < before.length && before[common] === preview.en[common]) common++;
+      spoken.replaceChildren(document.createTextNode(preview.en.slice(0, common)), freshText(preview.en.slice(common)));
+    }
+  }
 }
 async function devices() {
   try {
@@ -163,8 +228,18 @@ function trimLive() {
   liveRows = liveRows.filter(r => r.id >= firstId)
 }
 async function poll() {
+  let delay = 50;
   try {
-    const s = await api(`state?after=${lastId}`);
+    let s;
+    try { s = await api(`live?after=${lastId}&revision=${liveRevision}`); }
+    catch (error) { s = await api(`state?after=${lastId}&revision=${liveRevision}`); delay = 1000; }
+    liveRevision = s.revision ?? -1;
+    if (s.hardware) {
+      const mode = `ASR ${s.hardware.asr} / 中文 ${s.hardware.translation}`;
+      document.querySelector('h1').textContent = 'Live English Captions · ' + mode;
+      document.title = 'Live English Captions · ' + mode;
+      $('status').title = Object.entries(s.hardware.fallback || {}).map(([k,v]) => `${k}: ${v}`).join('\n');
+    }
     $('status').textContent = s.status;
     $('error').textContent = s.error;
     $('level').value = s.level;
@@ -173,7 +248,7 @@ async function poll() {
     $('device').disabled = s.running;
     $('microphone').disabled = s.running;
     $('refresh').disabled = s.running;
-    if (s.rows.length) {
+    if (s.rows.length || s.updates?.length || s.partials !== undefined) {
       const sc = $('live-scroll'),
         follow = followLatest && !selectionActive() && currentTab === 'live';
       for (const r of s.rows) {
@@ -182,11 +257,14 @@ async function poll() {
         liveRows.push(r);
         lastId = r.id
       }
-      $('empty').hidden = true;
+      for (const r of s.updates || []) updateTranslation(r);
+      updatePreviews(s.partials || []);
+      $('empty').hidden = liveRows.length > 0 || (s.partials || []).length > 0;
       trimLive();
       if (follow) sc.scrollTop = sc.scrollHeight
     } else trimLive()
   } catch (e) {
+    delay = 1000;
     $('status').textContent = '服务连接失败';
     $('error').textContent = '后台服务未连接，请双击 start.cmd 恢复服务。';
     $('refresh').disabled = false;
@@ -195,7 +273,7 @@ async function poll() {
     $('start').disabled = true;
     $('stop').disabled = true
   } finally {
-    setTimeout(poll, 2000)
+    setTimeout(poll, delay)
   }
 }
 for (const b of document.querySelectorAll('nav button')) b.onclick = async () => {

@@ -89,6 +89,16 @@ class Store:
             result["speaker"] = name["name"]
         return result
 
+    def update_translation(self, transcript_id, chinese):
+        with self.connect() as db:
+            db.execute("UPDATE transcripts SET zh=?,translation_engine=? WHERE id=?", (chinese, ENGINE, transcript_id))
+            row = db.execute("SELECT * FROM transcripts WHERE id=?", (transcript_id,)).fetchone()
+        return self.caption(row) if row else None
+
+    def pending_translations(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("SELECT id,en FROM transcripts WHERE zh='' ORDER BY id")]
+
     def rename_speaker(self, source, name):
         with self.connect() as db:
             db.execute(

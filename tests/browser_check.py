@@ -54,13 +54,13 @@ with tempfile.TemporaryDirectory() as folder:
                 )
                 assert sizes["en"] > sizes["zh"]
                 page.locator("#rows .spoken").last.evaluate(
-                    "el=>{const range=document.createRange();const start=el.textContent.indexOf('weekend');range.setStart(el.firstChild,start);range.setEnd(el.firstChild,start+7);const s=getSelection();s.removeAllRanges();s.addRange(range);el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}))}"
+                    "el=>{const range=document.createRange();const start=el.textContent.indexOf('weekend');const text=el.firstChild.nodeType===3?el.firstChild:el.firstChild.firstChild;range.setStart(text,start);range.setEnd(text,start+7);const s=getSelection();s.removeAllRanges();s.addRange(range);el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}))}"
                 )
                 assert page.locator("#lookup-term").input_value() == "weekend"
                 async_state = {"injected": False}
 
                 def new_caption(route):
-                    response = route.fetch()
+                    response = route.fetch(url=route.request.url.replace('/api/live?', '/api/state?'))
                     data = response.json()
                     if not async_state["injected"]:
                         extra = dict(
@@ -75,6 +75,9 @@ with tempfile.TemporaryDirectory() as folder:
                     route.fulfill(response=response, json=data)
 
                 page.route("**/api/state?*", new_caption)
+                page.route("**/api/live?*", new_caption)
+                # Complete the outstanding long poll so the new route is exercised.
+                page.evaluate("fetch('/api/stop',{method:'POST'})")
                 # No full caption redraw during polling: the selected text stays selected.
                 page.wait_for_timeout(2300)
                 assert page.evaluate("getSelection().toString()") == "weekend"

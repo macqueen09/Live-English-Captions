@@ -3,6 +3,7 @@
 import threading
 import unicodedata
 from pathlib import Path
+from inference import AdaptiveModel
 
 MODEL_REPO = "JustFrederik/nllb-200-distilled-600M-ct2-int8"
 MODEL_DIR = "nllb-600m-int8"
@@ -27,7 +28,7 @@ def suspicious_output(text, source=""):
 
 
 class ChineseTranslator:
-    def __init__(self, directory):
+    def __init__(self, directory, on_change=None):
         import ctranslate2
         from tokenizers import Tokenizer
 
@@ -35,12 +36,11 @@ class ChineseTranslator:
         if not (directory / "model.bin").exists():
             raise RuntimeError("NLLB 翻译模型未安装，请运行 setup.ps1 更新。")
         self.tokenizer = Tokenizer.from_file(str(directory / "tokenizer.json"))
-        self.model = ctranslate2.Translator(
-            str(directory),
-            device="cpu",
-            compute_type="int8",
-            inter_threads=1,
-            intra_threads=4,
+        self.runtime = AdaptiveModel(
+            lambda device, compute: ctranslate2.Translator(
+                str(directory), device=device, compute_type=compute,
+                inter_threads=1, intra_threads=4,
+            ), on_change=on_change,
         )
         self.lock = threading.RLock()
         self.cache = {}
@@ -57,14 +57,14 @@ class ChineseTranslator:
                 split = middle
             return self.translate(text[:split]) + " " + self.translate(text[split:])
         source = ["eng_Latn", *tokens, "</s>"]
-        result = self.model.translate_batch(
+        result = self.runtime.run(lambda model: model.translate_batch(
             [source],
             target_prefix=[["zho_Hans"]],
             beam_size=beam,
             max_decoding_length=512,
             repetition_penalty=1.1,
             return_scores=True,
-        )[0]
+        )[0])
         target = result.hypotheses[0]
         ids = [self.tokenizer.token_to_id(token) for token in target]
         if any(token is None for token in ids):

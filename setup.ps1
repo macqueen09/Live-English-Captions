@@ -13,6 +13,11 @@ if (-not (Test-Path -LiteralPath $uv)) {
 if ($LASTEXITCODE -ne 0) { throw 'Python environment setup failed.' }
 & $uv pip install --python '.venv\Scripts\python.exe' -r requirements.lock --index-url 'https://mirrors.huaweicloud.com/repository/pypi/simple' --link-mode copy
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    Write-Host 'Installing optional NVIDIA runtime into the project environment...'
+    & $uv pip install --python '.venv\Scripts\python.exe' -r requirements-gpu.txt --index-url 'https://mirrors.huaweicloud.com/repository/pypi/simple' --link-mode copy
+    if ($LASTEXITCODE -ne 0) { Write-Warning 'NVIDIA runtime installation failed; captions will use CPU fallback.' }
+}
 if ($Mirror) { $env:HF_ENDPOINT = 'https://hf-mirror.com'; $env:HF_HUB_DISABLE_XET = '1' }
 & '.\.venv\Scripts\python.exe' download_models.py
 if ($LASTEXITCODE -ne 0) { throw 'Model download failed. Check network and run setup again.' }

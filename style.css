@@ -447,3 +447,6 @@ article:has(.en) {
 }
 
 .version{font-size:12px;color:#8ca0bf;font-weight:normal;vertical-align:middle}
+.caption-new { background: #25465d; color: #fff0b3; }
+.partial-caption { border-left: 2px solid #6683aa; }
+.partial-caption .spoken { color: #bbcee8; }
