@@ -55,7 +55,7 @@ with sync_playwright() as p:
     page.goto("http://127.0.0.1:8765")
     page.wait_for_function("lastId===24")
     page.wait_for_function("followLatest")
-    assert page.locator("h1").inner_text() == "Live English Captions"
+    assert page.locator("h1").inner_text().startswith("Live English Captions")
     assert page.locator("#rows article").count() == 12
     # Scroll back: incoming speech must not shift/remove old captions.
     page.evaluate("document.getElementById('live-scroll').scrollTop=100")
@@ -79,15 +79,18 @@ with sync_playwright() as p:
         "document.getElementById('live-scroll').scrollHeight-document.getElementById('live-scroll').scrollTop-document.getElementById('live-scroll').clientHeight<9"
     )
     page.screenshot(path=str(root / ".tools" / "layout-normal.png"))
-    normal_height = page.locator("#live-scroll").bounding_box()["height"]
+    launched = []
+
+    def launch(route):
+        launched.append(True)
+        route.fulfill(json={"ok": True})
+
+    page.route("**/api/overlay", launch)
     page.locator("#compact").click()
-    assert page.locator("nav").is_hidden()
-    assert page.locator("#compact").inner_text() == "退出字幕模式"
-    assert page.locator("#live-scroll").bounding_box()["height"] > normal_height + 150
-    page.screenshot(path=str(root / ".tools" / "layout-caption-mode.png"))
-    page.locator("#compact").click()
+    page.wait_for_function(
+        "document.getElementById('compact').textContent==='打开悬浮字幕'"
+    )
+    assert launched
     assert page.locator("nav").is_visible()
     browser.close()
-print(
-    "Layout passed: dense rows, merge, paused scroll, resumed follow, distinct caption mode."
-)
+print("Layout passed: dense rows, merge, scrolling and native overlay launch request.")

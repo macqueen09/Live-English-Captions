@@ -4,6 +4,10 @@ $pythonPath = Join-Path $taskRoot '.venv\Scripts\python.exe'
 $scriptPath = Join-Path $taskRoot 'app.py'
 $logDirectory = Join-Path $taskRoot 'data'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
+try { Invoke-RestMethod 'http://127.0.0.1:8767/' -TimeoutSec 1 | Out-Null } catch {
+    $overlayLauncher = Join-Path $taskRoot 'overlay_launcher.py'
+    Start-Process -FilePath $pythonPath -ArgumentList ('"' + $overlayLauncher + '"') -WorkingDirectory $taskRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDirectory 'overlay-launcher.log') -RedirectStandardError (Join-Path $logDirectory 'overlay-launcher-error.log') | Out-Null
+}
 try {
     $state = Invoke-RestMethod 'http://127.0.0.1:8765/api/state' -TimeoutSec 2
     $ready = $null -ne $state.rows

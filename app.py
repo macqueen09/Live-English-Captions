@@ -2,6 +2,8 @@
 
 import math
 import os
+import subprocess
+import sys
 import queue
 import threading
 from collections import deque
@@ -18,9 +20,31 @@ from datetime import datetime
 from datetime import timedelta
 from uuid import uuid4
 from speakers import VoiceTracker, MODEL_NAME
+from translation import ChineseTranslator, MODEL_DIR, ENGINE
+from version import VERSION
 
 ROOT = Path(__file__).resolve().parent
-app = FastAPI()
+app = FastAPI(title="Live English Captions", version=VERSION)
+overlay_process = None
+overlay_lock = threading.Lock()
+
+
+@app.post("/api/overlay")
+def open_overlay():
+    global overlay_process
+    with overlay_lock:
+        if overlay_process is None or overlay_process.poll() is not None:
+            with (ROOT / "data" / "overlay.log").open("a", encoding="utf-8") as log:
+                overlay_process = subprocess.Popen(
+                    [sys.executable, str(ROOT / "overlay.py")],
+                    cwd=ROOT,
+                    stdout=log,
+                    stderr=log,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+    return {"ok": True}
+
+
 store = Store(os.environ.get("SUBTITLES_DATA_DIR", ROOT / "data"))
 
 # PortAudio initialization/termination is not safe across concurrent HTTP threads.
@@ -88,16 +112,9 @@ class Service:
             self.rows.append(row)
 
     def translate(self, text):
-        import argostranslate.translate
-
         with self.translation_lock:
             if self.translator is None:
-                languages = argostranslate.translate.get_installed_languages()
-                en = next((x for x in languages if x.code == "en"), None)
-                zh = next((x for x in languages if x.code == "zh"), None)
-                if not en or not zh:
-                    raise RuntimeError("英译中模型未安装，请先运行 setup.ps1。")
-                self.translator = en.get_translation(zh)
+                self.translator = ChineseTranslator(ROOT / "models" / MODEL_DIR)
             return self.translator.translate(text)
 
     def load_models(self):
@@ -344,6 +361,8 @@ def stop():
 def state(after: int = 0):
     with service.lock:
         return dict(
+            version=VERSION,
+            translation_engine=ENGINE,
             status=service.status,
             error=service.error,
             level=service.level,

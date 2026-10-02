@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $uv)) {
 }
 & $uv venv --python 3.12 --managed-python --allow-existing .venv
 if ($LASTEXITCODE -ne 0) { throw 'Python environment setup failed.' }
-& $uv pip install --python '.venv\Scripts\python.exe' -r requirements.txt --index-url 'https://mirrors.huaweicloud.com/repository/pypi/simple' --link-mode copy
+& $uv pip install --python '.venv\Scripts\python.exe' -r requirements.lock --index-url 'https://mirrors.huaweicloud.com/repository/pypi/simple' --link-mode copy
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
 if ($Mirror) { $env:HF_ENDPOINT = 'https://hf-mirror.com'; $env:HF_HUB_DISABLE_XET = '1' }
 & '.\.venv\Scripts\python.exe' download_models.py

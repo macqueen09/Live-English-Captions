@@ -129,11 +129,15 @@ $('stop').onclick = async () => {
     $('error').textContent = e.message
   }
 };
-$('compact').onclick = () => {
-  const enabled = document.body.classList.toggle('compact');
-  $('compact').textContent = enabled ? '退出字幕模式' : '字幕模式';
-  $('compact').setAttribute('aria-pressed', String(enabled));
-  if (followLatest) $('live-scroll').scrollTop = $('live-scroll').scrollHeight;
+$('compact').onclick = async () => {
+  try {
+    try { await api('overlay', {}); }
+    catch (error) {
+      const response = await fetch('http://127.0.0.1:8767/open', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+      if (!response.ok) throw Error('无法启动悬浮窗，请双击桌面快捷方式后重试。');
+    }
+    $('compact').textContent = '打开悬浮字幕';
+  } catch (error) { $('error').textContent = error.message; }
 };
 $('live-scroll').addEventListener('scroll', () => {
   const sc = $('live-scroll');

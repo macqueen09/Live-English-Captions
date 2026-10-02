@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from translation import ENGINE
 
 CST = timezone(timedelta(hours=8))
 
@@ -32,6 +33,10 @@ class Store:
                 db.execute(
                     "ALTER TABLE transcripts ADD COLUMN source TEXT NOT NULL DEFAULT 'output'"
                 )
+            if "translation_engine" not in columns:
+                db.execute(
+                    "ALTER TABLE transcripts ADD COLUMN translation_engine TEXT NOT NULL DEFAULT 'legacy_argos'"
+                )
 
     @contextmanager
     def connect(self):
@@ -47,13 +52,14 @@ class Store:
         now = timestamp or datetime.now(CST)
         with self.connect() as db:
             cursor = db.execute(
-                "INSERT INTO transcripts(date,timestamp,en,zh,source) VALUES(?,?,?,?,?)",
+                "INSERT INTO transcripts(date,timestamp,en,zh,source,translation_engine) VALUES(?,?,?,?,?,?)",
                 (
                     now.date().isoformat(),
                     now.isoformat(timespec="seconds"),
                     en,
                     zh,
                     source,
+                    ENGINE,
                 ),
             )
             row = db.execute(

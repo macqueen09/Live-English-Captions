@@ -6,4 +6,6 @@ PyAudioWPatch>=0.2.12.7,<0.3
 faster-whisper>=1.1,<2
 av>=11,<17
 sherpa-onnx>=1.12,<2
-argostranslate>=1.9,<2
+ctranslate2>=4.8,<5
+tokenizers>=0.22,<1
+huggingface-hub>=0.34,<2

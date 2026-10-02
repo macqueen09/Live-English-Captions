@@ -445,3 +445,5 @@ article:has(.en) {
     font-size: 14px
   }
 }
+
+.version{font-size:12px;color:#8ca0bf;font-weight:normal;vertical-align:middle}
