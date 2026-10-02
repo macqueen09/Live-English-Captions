@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>
+      Live English Captions
+    </title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>
+          Live English Captions
+        </h1>
+        <p class="muted">
+          英语原文 · 中文翻译 · 我的单词本　|　本机离线处理
+        </p>
+      </header>
+      <nav>
+        <button class="active" data-tab="live">
+          实时字幕
+        </button>
+        <button data-tab="history">
+          按日期回看
+        </button>
+        <button data-tab="vocabulary">
+          个人单词本
+        </button>
+      </nav>
+      <section id="live" class="panel">
+        <div class="toolbar">
+          <select id="device" aria-label="耳机设备">
+          </select>
+          <select id="microphone" aria-label="麦克风">
+          </select>
+          <button id="refresh">
+            刷新设备
+          </button>
+          <button id="start" class="primary">
+            开始翻译
+          </button>
+          <button id="stop" disabled>
+            停止
+          </button>
+          <button id="compact">
+            字幕模式
+          </button>
+        </div>
+        <div class="status">
+          <span id="status">
+            连接服务中…
+          </span>
+          <meter id="level" min="0" max="0.08" value="0" aria-label="音量">
+          </meter>
+          <button id="follow-state" class="follow-state">
+            跟随最新字幕
+          </button>
+        </div>
+        <p id="error" class="error" role="alert">
+        </p>
+        <p class="hint">
+          选择聊天软件实际使用的耳机设备。耳机与麦克风均按英语识别。最近字幕留在此处，相邻同人物短句适当合并，所有对话自动按日期保存。选中英文单词或短语，即可单独翻译。
+        </p>
+        <div id="live-scroll" class="caption-scroll">
+          <div id="empty" class="empty">
+            开始翻译后，英文和中文会显示在这里
+          </div>
+          <div id="rows" aria-live="polite">
+          </div>
+        </div>
+      </section>
+      <section id="history" class="panel" hidden>
+        <div class="toolbar">
+          <select id="dates" aria-label="聊天日期">
+          </select>
+          <button id="history-refresh">
+            刷新日期
+          </button>
+          <button id="export-all">
+            导出全部对话（含人物）
+          </button>
+          <button id="history-export">
+            导出当天字幕
+          </button>
+        </div>
+        <p class="hint">
+          按北京时间分组，重启服务后依然保留。历史英文也可以选词。对方编号按本次会话区分，点击「改人物」可修正识别结果。
+        </p>
+        <p id="history-message" class="muted">
+        </p>
+        <button id="older" hidden>
+          加载更早记录
+        </button>
+        <div id="history-rows">
+        </div>
+      </section>
+      <section id="vocabulary" class="panel" hidden>
+        <div class="toolbar">
+          <input id="word-search" placeholder="搜索英文或中文" aria-label="搜索单词">
+          <button id="words-refresh">
+            刷新单词本
+          </button>
+          <button id="words-export">
+            导出单词本
+          </button>
+          <button id="study-start" class="primary">
+            开始复习
+          </button>
+        </div>
+        <p class="hint">
+          保存单词或短语时保留所在原句；重复保存同一词会更新释义。
+        </p>
+        <div id="study" class="study" hidden>
+          <div id="study-count" class="muted">
+          </div>
+          <h2 id="study-term">
+          </h2>
+          <p id="study-context" class="muted">
+          </p>
+          <p id="study-answer" hidden>
+          </p>
+          <button id="reveal">
+            显示释义
+          </button>
+          <div id="study-actions" hidden>
+            <button id="remember">
+              已记住
+            </button>
+            <button id="again">
+              还需学习
+            </button>
+          </div>
+        </div>
+        <p id="word-count" class="muted">
+        </p>
+        <div id="word-list">
+        </div>
+      </section>
+      <aside id="lookup" class="lookup" hidden>
+        <div class="lookup-heading">
+          <strong>
+            查词
+          </strong>
+          <button id="lookup-close" aria-label="关闭查词">
+            ×
+          </button>
+        </div>
+        <input id="lookup-term" aria-label="英文单词或短语" maxlength="120" placeholder="选中英文，或输入单词 / 短语">
+        <div class="lookup-actions">
+          <button id="lookup-translate" class="primary">
+            翻译选中内容
+          </button>
+          <button id="lookup-save" disabled>
+            保存到单词本
+          </button>
+        </div>
+        <p id="lookup-result" aria-live="polite">
+        </p>
+        <p id="lookup-context" class="muted">
+        </p>
+        <p id="lookup-message" class="muted">
+        </p>
+      </aside>
+      <button id="lookup-open" class="floating">
+        选词翻译
+      </button>
+    </main>
+    <script src="/app.js">
+    </script>
+  </body>
+</html>
