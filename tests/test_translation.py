@@ -28,3 +28,12 @@ class TranslationTests(unittest.TestCase):
     def test_unrecoverable_output_is_explicitly_marked(self):
         t = self.translator(["\ue0f6", "\ufffd"])
         self.assertEqual(t.translate("Hello"), "［译文异常，请参考英文原文］")
+
+    def test_same_phrase_in_different_contexts_has_separate_cache_entries(self):
+        t = self.translator(["充电", "费用"])
+        phone = [("The phone battery is empty.", "手机没电了。")]
+        price = [("What is the price?", "价格是多少？")]
+        self.assertEqual(t.translate("charge", context=phone), "充电")
+        self.assertEqual(t.translate("charge", context=price), "费用")
+        self.assertEqual(t.translate("charge", context=phone), "充电")
+        self.assertEqual(t.infer.call_count, 2)

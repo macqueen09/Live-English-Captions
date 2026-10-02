@@ -1,6 +1,7 @@
 import threading
 import unittest
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 from unittest.mock import MagicMock
 import numpy as np
@@ -152,6 +153,28 @@ class ServiceTests(unittest.TestCase):
         rows = app.store.recent()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["zh"], "重启后翻译")
+
+    def test_short_fragments_share_translation_and_next_person_gets_context(self):
+        old = app.store.append("Old history", "旧记录保持原样", "microphone")
+        self.service.tracker = SimpleNamespace(session="abcdef12")
+        with patch.object(self.service, "translate", side_effect=["合并后的完整译文", "另一人物的译文"]) as translate:
+            self.service.ensure_translation_worker()
+            self.service.emit_final("Could you", "microphone", None)
+            self.service.emit_final("bring the sensor tomorrow?", "microphone", None)
+            self.service.translation_jobs.join()
+            self.assertEqual(translate.call_count, 1)
+            self.assertEqual(translate.call_args.args, ("Could you bring the sensor tomorrow?",))
+            self.service.emit_final("Yes I can bring the sensor to you tomorrow.", "remote:abcdef12:1", None)
+            self.service.translation_jobs.join()
+            self.assertEqual(translate.call_args.kwargs["context"], [("Could you bring the sensor tomorrow?", "合并后的完整译文")])
+        rows = app.store.recent()
+        self.assertEqual(rows[0]["zh"], old["zh"])
+        self.assertEqual(rows[1]["translation_group"], rows[1]["id"])
+        self.assertEqual(rows[2]["translation_group"], rows[1]["id"])
+        exported = "".join(app.store.export())
+        self.assertEqual(exported.count("合并后的完整译文"), 1)
+        self.assertIn("Could you", exported)
+        self.assertIn("bring the sensor tomorrow?", exported)
 
 
 if __name__ == "__main__":

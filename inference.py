@@ -17,7 +17,7 @@ def configure_cuda_libraries():
 
 
 class AdaptiveModel:
-    def __init__(self, factory, on_change=None):
+    def __init__(self, factory, on_change=None, gpu_compute="int8_float16"):
         configure_cuda_libraries()
         import ctranslate2
 
@@ -28,7 +28,7 @@ class AdaptiveModel:
         self.model = None
         try:
             if ctranslate2.get_cuda_device_count() > 0:
-                self.model = factory("cuda", "int8_float16")
+                self.model = factory("cuda", gpu_compute)
                 self.device = "cuda"
         except Exception as exc:
             self.reason = str(exc)

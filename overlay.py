@@ -8,6 +8,8 @@ import tkinter as tk
 import urllib.request
 from datetime import datetime
 from version import VERSION
+from caption_layout import LiveParagraphs
+from native_view import NativeParagraphs, NativeChinese
 
 BASE = "http://127.0.0.1:8765"
 
@@ -35,12 +37,11 @@ def main():
     last_id = 0
     previous = None
     follow_latest = True
+    follow_chinese = True
     highlight_id = 0
     lookup_generation = 0
     lookup_window = None
-    chinese_marks = {}
-    preview_texts = {}
-    preview_present = False
+    layout = LiveParagraphs()
 
     bar = tk.Frame(root, bg="#1a2333")
     bar.pack(fill="x")
@@ -74,10 +75,12 @@ def main():
 
     button("关闭", close)
     def follow():
-        nonlocal follow_latest
+        nonlocal follow_latest, follow_chinese
         follow_latest = True
+        follow_chinese = True
         captions.tag_remove("sel", "1.0", "end")
         captions.see("end")
+        chinese.see("end")
 
     button("跟随最新", follow)
 
@@ -125,6 +128,11 @@ def main():
         selectbackground="#365fc5",
         state="disabled",
     )
+    chinese = tk.Text(root, height=4, bg="#121d2c", fg="#b4c2d8", wrap="word", relief="flat",
+                      padx=15, pady=5, font=("Microsoft YaHei", 11), state="disabled", cursor="arrow")
+    chinese.pack(side="bottom", fill="x")
+    chinese.tag_configure("zh", font=("Microsoft YaHei", 11), foreground="#b4c2d8")
+    chinese.tag_configure("meta", font=("Microsoft YaHei", 8), foreground="#899dbb")
     captions.pack(fill="both", expand=True)
     captions.tag_configure("en", font=("Segoe UI", 22), spacing1=6)
     captions.tag_configure(
@@ -142,15 +150,26 @@ def main():
     for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<KeyRelease-Prior>", "<KeyRelease-Next>", "<KeyRelease-Home>", "<KeyRelease-End>"):
         captions.bind(sequence, user_scroll, add="+")
 
-    def insert_fresh(at, text, language):
+    def chinese_scroll(event):
+        def changed():
+            nonlocal follow_chinese
+            follow_chinese = chinese.yview()[1] >= .995
+        root.after_idle(changed)
+    chinese.bind("<MouseWheel>", chinese_scroll, add="+")
+
+    def insert_fresh(at, text, language, widget=None):
         nonlocal highlight_id
         highlight_id += 1
+        widget = widget or captions
         tag = f"fresh{highlight_id}"
         # Colour only: adding/removing emphasis must never change glyph metrics.
-        captions.tag_configure(tag, background="#25465d", foreground="#fff0b3")
-        captions.insert(at, text, (language, tag))
-        captions.tag_raise("sel")
-        root.after(4500, lambda: captions.tag_delete(tag) if alive.is_set() else None)
+        widget.tag_configure(tag, background="#25465d", foreground="#fff0b3")
+        widget.insert(at, text, (language, tag))
+        widget.tag_raise("sel")
+        root.after(4500, lambda: widget.tag_delete(tag) if alive.is_set() else None)
+
+    english_view = NativeParagraphs(captions, insert_fresh)
+    chinese_view = NativeChinese(chinese, insert_fresh)
 
     def post(path, body):
         request = urllib.request.Request(BASE + "/api/" + path,
@@ -291,117 +310,29 @@ def main():
                 threading.Event().wait(0.1)
 
     def render():
-        nonlocal last_id, previous, preview_present, preview_texts
+        nonlocal last_id
         while not updates.empty():
             state = updates.get_nowait()
             if "callback" in state:
                 state["callback"]()
                 continue
             hardware = state.get("hardware", {})
-            mode = f"ASR {hardware.get('asr', '--')} / 中文 {hardware.get('translation', '--')}"
+            mode = f"ASR {hardware.get('asr_model', 'small.en')} {hardware.get('asr', '--')} / 中文 {hardware.get('translation', '--')}"
             title = f"Live English Captions {VERSION} · {mode}"
             root.title(title)
             status.configure(text=title + " · " + state["status"])
             should_follow = follow_latest and not captions.tag_ranges("sel")
             position = captions.index("@0,0")
             captions.configure(state="normal")
-            partials = state.get("partials", [])
-            current_previews = {p["source"]: (p["utterance"], p["en"]) for p in partials}
-            refresh_previews = current_previews != preview_texts or any(r["id"] > last_id for r in state["rows"])
-            if refresh_previews and preview_present:
-                captions.delete("previewStart", "end-1c")
-                preview_present = False
-            for row in state["rows"]:
-                if row["id"] <= last_id:
-                    continue
-                gap = (
-                    (
-                        datetime.fromisoformat(row["timestamp"])
-                        - datetime.fromisoformat(previous["timestamp"])
-                    ).total_seconds()
-                    if previous
-                    else 999
-                )
-                merge = (
-                    previous
-                    and previous["source"] == row["source"]
-                    and previous["speaker"] == row["speaker"]
-                    and 0 <= gap <= 12
-                    and len(previous["en"]) + len(row["en"]) < 380
-                )
-                if merge:
-                    for mark, text, tag in [
-                        ("lastEnglishEnd", " " + row["en"], "en"),
-                        ("lastChineseEnd", " " + (row["zh"] or "中文稍后补充…"), "zh"),
-                    ]:
-                        at = captions.index(mark)
-                        if tag == "zh":
-                            start_mark, end_mark = f"zhStart{row['id']}", f"zhEnd{row['id']}"
-                            captions.mark_set(start_mark, at)
-                            captions.mark_gravity(start_mark, "left")
-                        if tag == "zh" and not row["zh"]:
-                            captions.insert(at, text, tag)
-                        else:
-                            insert_fresh(at, text, tag)
-                        captions.mark_set(mark, f"{at}+{len(text)}c")
-                        if tag == "zh":
-                            captions.mark_gravity(start_mark, "right")
-                            captions.mark_set(end_mark, f"{at}+{len(text)}c")
-                            captions.mark_gravity(end_mark, "left")
-                            chinese_marks[row["id"]] = (start_mark, end_mark, " ", row["zh"])
-                    row = dict(row, en=previous["en"] + " " + row["en"])
-                else:
-                    insert_fresh("end", row["en"], "en")
-                    captions.mark_set("lastEnglishEnd", "end-1c")
-                    captions.mark_gravity("lastEnglishEnd", "left")
-                    captions.insert(
-                        "end", f"  {row['time']} · {row['speaker']}\n", "meta"
-                    )
-                    start_mark, end_mark = f"zhStart{row['id']}", f"zhEnd{row['id']}"
-                    captions.mark_set(start_mark, "end-1c")
-                    captions.mark_gravity(start_mark, "left")
-                    if row["zh"]:
-                        insert_fresh("end", row["zh"], "zh")
-                    else:
-                        captions.insert("end", "中文稍后补充…", "zh")
-                    captions.mark_gravity(start_mark, "right")
-                    captions.mark_set(end_mark, "end-1c")
-                    captions.mark_gravity(end_mark, "left")
-                    chinese_marks[row["id"]] = (start_mark, end_mark, "", row["zh"])
-                    captions.mark_set("lastChineseEnd", "end-1c")
-                    captions.mark_gravity("lastChineseEnd", "left")
-                    captions.insert("end", "\n", "zh")
-                last_id = row["id"]
-                previous = row
-            for row in state.get("updates", []):
-                marks = chinese_marks.get(row["id"])
-                if not marks or marks[3] == row["zh"]:
-                    continue
-                start_mark, end_mark, prefix, _ = marks
-                at = captions.index(start_mark)
-                captions.delete(start_mark, end_mark)
-                text = prefix + row["zh"]
-                insert_fresh(at, text, "zh")
-                captions.mark_set(start_mark, at)
-                captions.mark_set(end_mark, f"{at}+{len(text)}c")
-                chinese_marks[row["id"]] = (start_mark, end_mark, prefix, row["zh"])
-                if row["id"] == last_id:
-                    captions.mark_set("lastChineseEnd", end_mark)
-            if refresh_previews and partials:
-                captions.mark_set("previewStart", "end-1c")
-                captions.mark_gravity("previewStart", "left")
-                for preview in partials:
-                    old = preview_texts.get(preview["source"], (None, ""))
-                    before = old[1] if old[0] == preview["utterance"] else ""
-                    common = 0
-                    while common < min(len(before), len(preview["en"])) and before[common] == preview["en"][common]:
-                        common += 1
-                    captions.insert("end", preview["en"][:common], "en")
-                    insert_fresh("end", preview["en"][common:], "en")
-                    captions.insert("end", f"  {preview['speaker']} · 实时预览\n", "meta")
-                preview_present = True
-            preview_texts = current_previews
+            paragraphs = state.get("paragraphs")
+            if paragraphs is None:
+                paragraphs = layout.apply(state["rows"] + state.get("updates", []), state.get("partials", []))
+            english_view.sync(paragraphs)
             captions.configure(state="disabled")
+            rows = [row for paragraph in paragraphs for row in paragraph["rows"]]
+            chinese_view.sync(rows + state.get("updates", []), follow=follow_chinese)
+            if state["rows"]:
+                last_id = max(last_id, max(row["id"] for row in state["rows"]))
             if should_follow:
                 captions.see("end")
             else:

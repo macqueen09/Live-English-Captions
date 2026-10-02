@@ -37,6 +37,8 @@ class Store:
                 db.execute(
                     "ALTER TABLE transcripts ADD COLUMN translation_engine TEXT NOT NULL DEFAULT 'legacy_argos'"
                 )
+            if "translation_group" not in columns:
+                db.execute("ALTER TABLE transcripts ADD COLUMN translation_group INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def connect(self):
@@ -97,7 +99,16 @@ class Store:
 
     def pending_translations(self):
         with self.connect() as db:
-            return [dict(row) for row in db.execute("SELECT id,en FROM transcripts WHERE zh='' ORDER BY id")]
+            return [dict(row) for row in db.execute("SELECT id,en,source,timestamp FROM transcripts WHERE zh='' ORDER BY id")]
+
+    def update_translation_group(self, ids, chinese):
+        group = ids[0] if len(ids) > 1 else 0
+        placeholders = ",".join("?" for _ in ids)
+        with self.connect() as db:
+            db.execute(f"UPDATE transcripts SET zh=?,translation_engine=?,translation_group=? WHERE id IN ({placeholders})",
+                       (chinese, ENGINE, group, *ids))
+            rows = db.execute(f"SELECT * FROM transcripts WHERE id IN ({placeholders}) ORDER BY id", ids).fetchall()
+        return [self.caption(row) for row in rows]
 
     def rename_speaker(self, source, name):
         with self.connect() as db:
@@ -133,7 +144,12 @@ class Store:
             for row in db.execute("SELECT * FROM transcripts ORDER BY timestamp,id"):
                 item = self.caption(row)
                 session = f"（会话 {item['session']}）" if item["session"] else ""
-                yield f"[{item['date']} {item['time']}] {item['speaker']}{session}\nEN: {item['en']}\n中文: {item['zh']}\n\n"
+                chinese = item['zh']
+                if item.get('translation_group') == item['id']:
+                    chinese = f"（语义段 #{item['id']}）{chinese}"
+                if item.get('translation_group') and item['translation_group'] != item['id']:
+                    chinese = f"（同一语义段的完整译文见字幕 #{item['translation_group']}）"
+                yield f"[{item['date']} {item['time']}] {item['speaker']}{session}\nEN: {item['en']}\n中文: {chinese}\n\n"
 
     def recent(self, limit=12):
         with self.connect() as db:

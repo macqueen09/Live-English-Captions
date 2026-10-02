@@ -6,6 +6,7 @@ let lastId = 0,
   currentTab = 'live';
 let followLatest = true;
 let liveRevision = -1;
+let followChinese = true;
 let selected = {
     term: '',
     zh: '',
@@ -65,6 +66,7 @@ function caption(r) {
   const translation = document.createElement('span');
   translation.dataset.translationId = r.id;
   translation.textContent = r.zh || '中文稍后补充…';
+  if (r.translation_group && r.translation_group !== r.id) translation.textContent = '（译文见同段首句）';
   chinese.append(translation);
   e.append(english, chinese);
   return e
@@ -108,12 +110,97 @@ function updateTranslation(row) {
   const span = $('rows').querySelector(`[data-translation-id="${row.id}"]`);
   if (span && row.zh !== span.dataset.zh) {
     const first = span.parentElement.firstElementChild === span;
-    span.replaceChildren(freshText((first ? '' : ' ') + row.zh));
+    const text = row.translation_group && row.translation_group !== row.id ? '（译文见同段首句）' : row.zh;
+    span.replaceChildren(freshText((first ? '' : ' ') + text));
     span.dataset.zh = row.zh;
   }
   for (const item of liveRows) if (item.id === row.id) Object.assign(item, row);
   for (const article of $('rows').children)
     for (const item of article.captionRows || []) if (item.id === row.id) Object.assign(item, row);
+}
+
+function updateEnglish(spoken, text) {
+  const before = spoken.textContent;
+  if (before === text) return;
+  if (text.startsWith(before)) { spoken.append(freshText(text.slice(before.length))); return; }
+  let common = 0;
+  while (common < Math.min(before.length, text.length) && before[common] === text[common]) common++;
+  const selection = window.getSelection();
+  if (selection?.toString() && spoken.contains(selection.anchorNode)) return;
+  // Keep prefix nodes intact; only the editable suffix is deleted/replaced.
+  const walker = document.createTreeWalker(spoken, NodeFilter.SHOW_TEXT);
+  let offset = common, start = walker.nextNode();
+  while (start && offset > start.length) { offset -= start.length; start = walker.nextNode(); }
+  if (start) {
+    const range = document.createRange();
+    range.setStart(start, offset);
+    range.setEnd(spoken, spoken.childNodes.length);
+    range.deleteContents();
+  } else spoken.replaceChildren();
+  spoken.append(freshText(text.slice(common)));
+}
+
+function renderParagraphs(paragraphs) {
+  const container = $('rows');
+  const firstKey = Number(paragraphs[0]?.key || Infinity);
+  let shown = paragraphs;
+  if (followLatest && !selectionActive()) shown = paragraphs.slice(-12);
+  else {
+    const first = Number(container.firstElementChild?.dataset.paragraphKey || firstKey);
+    shown = paragraphs.filter(p => Number(p.key) >= first);
+  }
+  const keys = new Set(shown.map(p => p.key));
+  for (const article of [...container.children])
+    if (!keys.has(article.dataset.paragraphKey) && (followLatest || Number(article.dataset.paragraphKey) >= firstKey)) article.remove();
+  for (const [index, p] of shown.entries()) {
+    let article = [...container.children].find(el => el.dataset.paragraphKey === p.key);
+    const row = p.rows[0] || {id:0, en:p.en, zh:'', source:p.source || p.capture_source, speaker:p.speaker, time:p.time, date:p.date};
+    if (!article) {
+      article = caption({...row, en:p.en});
+      article.dataset.paragraphKey = p.key;
+      article.querySelector('.spoken').replaceChildren(freshText(p.en));
+      const following = new Set(shown.slice(index+1).map(item => item.key));
+      const next = [...container.children].find(el => following.has(el.dataset.paragraphKey));
+      container.insertBefore(article, next || null);
+    } else updateEnglish(article.querySelector('.spoken'), p.en);
+    article.dataset.id = p.rows[0]?.id || 0;
+    article.captionRows = p.rows;
+    const person = article.querySelector('.speaker-name');
+    person.textContent = p.speaker;
+    person.dataset.source = p.source || p.capture_source;
+    person.onclick = () => row.source.startsWith('remote:') ? renameSpeaker(row) : null;
+    const edit = article.querySelector('.speaker-edit');
+    edit.disabled = !p.rows.length;
+    edit.onclick = () => correctSpeaker(row, article);
+  }
+  $('partial-rows').replaceChildren();
+}
+
+function renderChinese() {
+  const container = $('translation-scroll');
+  const rows = liveRows.filter(r => !r.translation_group || r.translation_group === r.id).slice(-16);
+  const ids = new Set(rows.map(r => String(r.id)));
+  for (const item of [...container.children]) if (!ids.has(item.dataset.id)) item.remove();
+  for (const row of rows) {
+    let item = [...container.children].find(el => el.dataset.id === String(row.id));
+    if (!item) {
+      item = document.createElement('article');
+      item.dataset.id = row.id;
+      const meaning = node('zh', '');
+      const text = document.createElement('span');
+      text.className = 'translation-text';
+      meaning.append(text, node('time', `${row.time} · ${row.speaker}`));
+      item.append(meaning);
+      const next = [...container.children].find(el => Number(el.dataset.id) > row.id);
+      container.insertBefore(item, next || null);
+    }
+    const meaning = item.querySelector('.translation-text');
+    if (item.dataset.zh !== row.zh) {
+      meaning.replaceChildren(row.zh ? freshText(row.zh) : document.createTextNode('中文稍后补充…'));
+      item.dataset.zh = row.zh;
+    }
+  }
+  if (followChinese) container.scrollTop = container.scrollHeight;
 }
 
 function updatePreviews(partials) {
@@ -213,9 +300,14 @@ $('live-scroll').addEventListener('scroll', () => {
 });
 $('follow-state').onclick = () => {
   followLatest = true;
+  followChinese = true;
   $('live-scroll').scrollTop = $('live-scroll').scrollHeight;
   $('follow-state').textContent = '跟随最新字幕';
 };
+$('translation-scroll').addEventListener('scroll', () => {
+  const sc = $('translation-scroll');
+  followChinese = sc.scrollHeight - sc.scrollTop - sc.clientHeight <= 8;
+}, {passive:true});
 
 function selectionActive() {
   return Boolean(window.getSelection()?.toString().trim())
@@ -250,17 +342,21 @@ async function poll() {
     $('refresh').disabled = s.running;
     if (s.rows.length || s.updates?.length || s.partials !== undefined) {
       const sc = $('live-scroll'),
-        follow = followLatest && !selectionActive() && currentTab === 'live';
+        atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight <= 8;
+      if (followLatest && !atBottom && !selectionActive()) followLatest = false;
+      const follow = followLatest && !selectionActive() && currentTab === 'live';
       for (const r of s.rows) {
         if (r.id <= lastId) continue;
-        appendCaption($('rows'), r);
+        if (!s.paragraphs) appendCaption($('rows'), r);
         liveRows.push(r);
         lastId = r.id
       }
       for (const r of s.updates || []) updateTranslation(r);
-      updatePreviews(s.partials || []);
+      if (s.paragraphs) renderParagraphs(s.paragraphs);
+      else updatePreviews(s.partials || []);
       $('empty').hidden = liveRows.length > 0 || (s.partials || []).length > 0;
       trimLive();
+      renderChinese();
       if (follow) sc.scrollTop = sc.scrollHeight
     } else trimLive()
   } catch (e) {

@@ -450,3 +450,11 @@ article:has(.en) {
 .caption-new { background: #25465d; color: #fff0b3; }
 .partial-caption { border-left: 2px solid #6683aa; }
 .partial-caption .spoken { color: #bbcee8; }
+.live-captions { height: 56vh; min-height: 340px; display: grid; grid-template-rows: minmax(0, 1fr) 110px; gap: 6px; }
+#live-scroll { height: auto; min-height: 0; }
+#rows article .zh { display: none; }
+#rows .en { margin-bottom: 0; }
+.translation-scroll { overflow-y: auto; scrollbar-gutter: stable; overflow-anchor: none; border: 1px solid #26344b; border-radius: 10px; padding: 6px 12px; background: #101824; }
+.translation-scroll article { margin: 3px 0; padding: 3px 0; background: transparent; border: 0; }
+.translation-scroll .zh { font-size: 13px; line-height: 1.5; }
+.translation-scroll .time { display: inline; margin-left: 8px; }

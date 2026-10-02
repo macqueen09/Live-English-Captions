@@ -72,6 +72,12 @@ with tempfile.TemporaryDirectory() as folder:
                         )
                         data["rows"].append(extra)
                         async_state["injected"] = True
+                        async_state["extra"] = extra
+                    extra = async_state["extra"]
+                    data["paragraphs"].append({"key":str(int(data["paragraphs"][-1]["key"])+1),
+                        "source":extra["source"], "speaker":extra["speaker"], "capture_source":"microphone",
+                        "en":extra["en"], "rows":[extra], "time":extra["time"], "date":extra["date"],
+                        "timestamp":extra["timestamp"], "pending":False})
                     route.fulfill(response=response, json=data)
 
                 page.route("**/api/state?*", new_caption)

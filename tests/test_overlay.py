@@ -45,8 +45,9 @@ class OverlayTests(unittest.TestCase):
 
         def exercise():
             root.attributes("-topmost", False)
-            root.geometry("480x180+0+0")
+            root.geometry("480x340+0+0")
             text = next(w for w in root.winfo_children() if isinstance(w, tk.Text))
+            chinese = next(w for w in root.winfo_children() if isinstance(w, tk.Text) and w is not text)
             bar = root.winfo_children()[0]
             follow = next(w for w in bar.winfo_children() if isinstance(w, tk.Button) and w.cget("text") == "跟随最新")
 
@@ -69,14 +70,25 @@ class OverlayTests(unittest.TestCase):
             self.assertEqual(text.bbox("1.6"), before)
             inbox.put({"status": "Test", "rows": [], "updates": [{"id": 1, "zh": "第一条迟到的中文"}, {"id": 2, "zh": "第二条迟到的中文"}]})
             pump()
-            self.assertIn("第一条迟到的中文 第二条迟到的中文", text.get("1.0", "end"))
+            self.assertIn("第一条迟到的中文", chinese.get("1.0", "end"))
+            self.assertIn("第二条迟到的中文", chinese.get("1.0", "end"))
+            self.assertEqual(text.bbox("1.6"), before)
             inbox.put({"status": "Test", "rows": [], "partials": [{"source": "output", "utterance": "a", "en": "Words before the pause", "speaker": "Other"}]})
             pump()
             self.assertIn("Words before the pause", text.get("1.0", "end"))
             inbox.put({"status": "Test", "rows": [], "partials": []})
             pump()
             self.assertNotIn("Words before the pause", text.get("1.0", "end"))
-            for i in range(3, 10):
+            inbox.put({"status":"Test", "rows":[], "partials":[{"source":"output", "utterance":"promote", "en":"Append here", "speaker":"Other"}]})
+            pump()
+            before_promote = text.bbox("1.0")
+            self.assertIsNotNone(before_promote)
+            inbox.put({"status":"Test", "rows":[{"id":3, "source":"remote:1", "speaker":"Other", "utterance":"promote", "capture_source":"output",
+                "en":"Append here", "zh":"", "timestamp":"2026-10-02T12:00:03", "time":"12:00", "date":"2026-10-02"}], "partials":[]})
+            pump()
+            self.assertTrue(text.get("1.0", "end").startswith("Hello world Append here  12:00"))
+            self.assertEqual(text.bbox("1.0"), before_promote)
+            for i in range(4, 10):
                 add(i, speaker=str(i))
             follow.invoke()
             for i in range(10, 13):
@@ -99,7 +111,7 @@ class OverlayTests(unittest.TestCase):
             self.assertEqual(save.cget("state"), "normal")
             save.invoke()
             pump()
-            self.assertEqual(requests[-1][1], {"term": "Hello", "zh": "你好", "context": "Hello world"})
+            self.assertEqual(requests[-1][1], {"term": "Hello", "zh": "你好", "context": "Hello world Append here"})
             follow.invoke()
             add(14, speaker="14")
             self.assertGreaterEqual(text.yview()[1], .995)

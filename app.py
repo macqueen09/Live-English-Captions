@@ -6,6 +6,8 @@ import subprocess
 import sys
 import queue
 import threading
+import time
+from dataclasses import dataclass
 from collections import deque
 from pathlib import Path
 
@@ -23,6 +25,9 @@ from speakers import VoiceTracker, MODEL_NAME
 from translation import ChineseTranslator, MODEL_DIR, ENGINE
 from version import VERSION
 from inference import AdaptiveModel
+from speech import MODEL_NAME as SPEECH_NAME, MODEL_DIR as SPEECH_DIR
+from streaming import StableEnglish, reconcile_groups
+from caption_layout import LiveParagraphs
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Live English Captions", version=VERSION)
@@ -88,6 +93,15 @@ class StartRequest(BaseModel):
     microphone: int | None = None
 
 
+@dataclass
+class TranslationJob:
+    id: int
+    en: str
+    source: str
+    timestamp: str
+    session: str = ""
+
+
 class Service:
     def __init__(self):
         self.lock = threading.RLock()
@@ -96,6 +110,8 @@ class Service:
         self.previews = {}
         self.preview_jobs = {}
         self.active_utterances = {}
+        self.stabilizers = {}
+        self.layout = LiveParagraphs()
         self.asr_runtime = None
         self.translation_jobs = queue.Queue()
         self.translation_thread = None
@@ -111,15 +127,17 @@ class Service:
         self.translator = None
         self.translation_lock = threading.RLock()
         self.tracker = None
+        self.inputs = {"device": None, "microphone": None}
         self.rows.extend(store.recent())
         self.sequence = self.rows[-1]["id"] if self.rows else 0
 
-    def emit(self, english, chinese, source="output", timestamp=None):
+    def emit(self, english, chinese, source="output", timestamp=None, **live_fields):
         with self.lock:
             row = store.append(english, chinese, source, timestamp)
             self.sequence = row["id"]
             self.revision += 1
             row["revision"] = self.revision
+            row.update(live_fields)
             self.rows.append(row)
             self.changed.notify_all()
             return row
@@ -135,6 +153,7 @@ class Service:
             "asr": self.asr_runtime.label if self.asr_runtime else "--",
             "translation": translation.label if translation else "--",
             "speaker": "CPU",
+            "asr_model": SPEECH_NAME,
             "fallback": {name: runtime.reason for name, runtime in
                          (("asr", self.asr_runtime), ("translation", translation)) if runtime and runtime.reason},
         }
@@ -144,34 +163,66 @@ class Service:
             if self.translation_thread and self.translation_thread.is_alive():
                 return
             for row in store.pending_translations():
-                self.translation_jobs.put((row["id"], row["en"]))
+                self.translation_jobs.put(TranslationJob(row["id"], row["en"], row["source"], row["timestamp"]))
             self.translation_thread = threading.Thread(target=self.translate_pending, daemon=True)
             self.translation_thread.start()
 
     def translate_pending(self):
+        deferred = None
+        recent = deque(maxlen=2)
+        context_session = None
         while True:
-            row_id, text = self.translation_jobs.get()
+            first = deferred or self.translation_jobs.get()
+            deferred = None
+            batch = [first]
+            text = first.en
+            # Allow adjacent, short fragments from a confirmed same speaker to
+            # arrive. Never group legacy rows, different people, sessions or dates.
+            if first.session and first.source != "output":
+                deadline = time.monotonic() + 1.8
+                while len(batch) < 4 and (len(text.split()) < 8 or not text.rstrip().endswith((".", "?", "!"))):
+                    try:
+                        following = self.translation_jobs.get(timeout=max(0.01, deadline - time.monotonic()))
+                    except queue.Empty:
+                        break
+                    gap = (datetime.fromisoformat(following.timestamp) - datetime.fromisoformat(batch[-1].timestamp)).total_seconds()
+                    if (following.session != first.session or following.source != first.source or
+                            following.timestamp[:10] != first.timestamp[:10] or not 0 <= gap <= 8 or len(text) + len(following.en) > 600):
+                        deferred = following
+                        break
+                    batch.append(following)
+                    text += " " + following.en
+                    if time.monotonic() >= deadline:
+                        break
             try:
+                if first.session != context_session:
+                    recent.clear()
+                    context_session = first.session
                 try:
-                    chinese = self.translate(text)
+                    chinese = self.translate(text, context=list(recent)) if recent else self.translate(text)
                 except Exception:
                     chinese = "［翻译暂不可用，请参考英文原文］"
+                if first.session and not chinese.startswith("［"):
+                    recent.append((text, chinese))
                 with self.lock:
-                    updated = store.update_translation(row_id, chinese)
-                    if updated:
+                    for updated in store.update_translation_group([job.id for job in batch], chinese):
                         self.revision += 1
                         updated["revision"] = self.revision
                         for index, row in enumerate(self.rows):
-                            if row["id"] == row_id:
+                            if row["id"] == updated["id"]:
+                                for field in ("utterance", "capture_source"):
+                                    if field in row:
+                                        updated[field] = row[field]
                                 self.rows[index] = updated
                                 break
-                        self.changed.notify_all()
+                    self.changed.notify_all()
             finally:
-                self.translation_jobs.task_done()
+                for _ in batch:
+                    self.translation_jobs.task_done()
 
-    def emit_final(self, english, source, timestamp):
-        row = self.emit(english, "", source, timestamp)
-        self.translation_jobs.put((row["id"], english))
+    def emit_final(self, english, source, timestamp, **live_fields):
+        row = self.emit(english, "", source, timestamp, **live_fields)
+        self.translation_jobs.put(TranslationJob(row["id"], english, source, row["timestamp"], self.tracker.session if self.tracker else ""))
 
     def transcribe(self, clip, preview=False):
         def infer(model):
@@ -186,24 +237,25 @@ class Service:
             return result
         return infer(self.model)
 
-    def translate(self, text):
+    def translate(self, text, context=()):
         with self.translation_lock:
             if self.translator is None:
                 self.translator = ChineseTranslator(ROOT / "models" / MODEL_DIR, on_change=self.notify)
                 self.notify()
-            return self.translator.translate(text)
+            return self.translator.translate(text, context=context)
 
     def load_models(self):
         from faster_whisper import WhisperModel
 
         self.status = "正在加载离线模型…"
         if self.model is None:
-            model_path = ROOT / "models" / "whisper-base.en"
+            model_path = ROOT / "models" / SPEECH_DIR
             if not (model_path / "model.bin").exists():
                 raise RuntimeError("语音模型未安装，请先运行 setup.ps1。")
             self.asr_runtime = AdaptiveModel(
                 lambda device, compute: WhisperModel(str(model_path), device=device, compute_type=compute),
                 on_change=self.notify,
+                gpu_compute="float16",
             )
             # Force a real encoder call: CUDA libraries load lazily, even if model loading succeeds.
             self.asr_runtime.run(lambda model: list(model.transcribe(
@@ -351,9 +403,11 @@ class Service:
                     text = " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.6).strip()
                     with self.lock:
                         if text and self.active_utterances.get(source) == utterance:
+                            stable = self.stabilizers.setdefault(utterance, StableEnglish()).update(text)
                             before = self.previews.get(source, {})
-                            if before.get("en") != text or before.get("utterance") != utterance:
-                                self.previews[source] = {"source": source, "utterance": utterance, "en": text,
+                            if before.get("en") != stable["en"] or before.get("stable_en") != stable["stable_en"] or before.get("utterance") != utterance:
+                                self.previews[source] = {"source": source, "utterance": utterance, **stable,
+                                    "timestamp": timestamp.isoformat(), "time": timestamp.strftime("%H:%M:%S"), "date": timestamp.date().isoformat(),
                                     "speaker": "我（麦克风）" if source == "microphone" else "对方（实时预览）"}
                                 self.notify()
                     continue
@@ -361,20 +415,30 @@ class Service:
                     text = " ".join(
                         s.text.strip() for s in segments if s.no_speech_prob < 0.6
                     ).strip()
-                    if text:
-                        self.emit_final(text, source, timestamp)
+                    groups = [{"text": text, "source": source, "offset": 0}] if text else []
                 else:
-                    for group in self.tracker.label_segments(clip, segments):
-                        if group["text"]:
-                            self.emit_final(
-                                group["text"],
-                                group["source"],
-                                timestamp + timedelta(seconds=group["offset"]),
-                            )
+                    groups = self.tracker.label_segments(clip, segments)
+                # Finish the editable tail while retaining the reader's confirmed prefix.
+                hypothesis = " ".join(group["text"] for group in groups)
                 with self.lock:
+                    stabilizer = self.stabilizers.pop(utterance, None)
+                    if not groups and stabilizer and stabilizer.stable:
+                        hypothesis = " ".join(stabilizer.stable)
+                        groups = [{"text": hypothesis, "source": source if source == "microphone" else self.tracker.classify(clip), "offset": 0}]
+                    final_text = stabilizer.update(hypothesis, final=True)["en"] if stabilizer and hypothesis else hypothesis
+                    groups = reconcile_groups(groups, final_text)
                     if self.previews.get(source, {}).get("utterance") == utterance:
                         self.previews.pop(source, None)
-                        self.notify()
+                    for group in groups:
+                        english = group["text"]
+                        if english:
+                            self.emit_final(
+                                english,
+                                group["source"],
+                                timestamp + timedelta(seconds=group["offset"]),
+                                utterance=utterance, capture_source=source,
+                            )
+                    self.notify()
                 if not self.stop.is_set():
                     self.status = listening
         except Exception as exc:
@@ -392,6 +456,7 @@ class Service:
                 self.previews.clear()
                 self.preview_jobs.clear()
                 self.active_utterances.clear()
+                self.stabilizers.clear()
                 self.notify()
 
 
@@ -462,6 +527,7 @@ def start(request: StartRequest):
         }:
             raise HTTPException(400, "麦克风不可用，请刷新设备。")
         service.stop.clear()
+        service.inputs = {"device": request.device, "microphone": request.microphone}
         service.error = ""
         service.thread = threading.Thread(
             target=service.run, args=(request.device, request.microphone), daemon=True
@@ -485,7 +551,9 @@ def state(after: int = 0, revision: int = -1):
             version=VERSION,
             revision=service.revision,
             hardware=service.hardware(),
+            inputs=service.inputs,
             partials=list(service.previews.values()),
+            paragraphs=service.layout.apply(list(service.rows), list(service.previews.values()))[-40:],
             pending_translations=service.translation_jobs.unfinished_tasks,
             updates=[r for r in service.rows if r["id"] <= after and r.get("revision", 0) > revision] if revision >= 0 else [],
             translation_engine=ENGINE,

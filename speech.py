@@ -1,0 +1,5 @@
+"""Pinned English speech model; GPU FP16, CPU fallback INT8."""
+MODEL_NAME = "small.en"
+MODEL_REPO = "Systran/faster-whisper-small.en"
+MODEL_DIR = "whisper-small.en"
+MODEL_REVISION = "d1d751a5f8271d482d14ca55d9e2deeebbae577f"

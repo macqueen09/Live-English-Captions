@@ -3,8 +3,13 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+import sys
 
 root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root))
+from caption_layout import LiveParagraphs
+layout = LiveParagraphs()
+partials = []
 start = datetime(2026, 10, 2, 20, 0, tzinfo=timezone(timedelta(hours=8)))
 rows = []
 
@@ -48,6 +53,8 @@ with sync_playwright() as p:
                 level=0,
                 running=False,
                 hardware={"asr": "GPU", "translation": "CPU", "fallback": {}},
+                paragraphs=layout.apply(rows, partials),
+                partials=partials,
                 rows=[r for r in rows if r["id"] > after],
             )
         )
@@ -68,7 +75,7 @@ with sync_playwright() as p:
     add("Here comes a new sentence while you are reading earlier messages.")
     page.wait_for_function("lastId===25")
     assert page.locator("#rows article").last.locator(".spoken .caption-new").inner_text().startswith("Here comes")
-    assert page.locator("#rows article").last.locator(".zh .caption-new").count() == 1
+    assert page.locator('#translation-scroll [data-id="25"] .caption-new').count() == 1
     assert page.locator("#rows article").first.get_attribute("data-id") == first
     assert abs(page.locator("#live-scroll").evaluate("el=>el.scrollTop") - position) < 2
     # Bottom resumes following, including when a short fragment merges with the last sentence.
@@ -81,7 +88,7 @@ with sync_playwright() as p:
     assert "rest of that thought" in page.locator("#rows .spoken").last.inner_text()
     assert page.locator("#rows article").last.evaluate("el=>el.captionRows.length") == 2
     assert page.locator("#rows .spoken").last.locator(".caption-new").last.inner_text().strip() == "And here is the rest of that thought."
-    assert page.locator("#rows .zh").last.locator(".caption-new").last.inner_text().strip() == rows[-1]["zh"]
+    assert page.locator('#translation-scroll [data-id="26"] .caption-new').inner_text().strip() == rows[-1]["zh"]
     emphasized_box = page.locator("#rows article").last.bounding_box()
     page.wait_for_timeout(4700)
     assert page.locator("#rows .caption-new").count() == 0
@@ -106,14 +113,21 @@ with sync_playwright() as p:
     # Delayed Chinese patches target the original span inside a merged paragraph.
     latest = rows[-1]
     page.evaluate("row => updateTranslation({...row, zh:'延后补上的中文'})", latest)
-    assert page.locator(f'[data-translation-id="{latest["id"]}"]').inner_text().strip() == "延后补上的中文"
-    first_translation = page.locator("#rows article").last.locator("[data-translation-id]").first.inner_text()
-    assert first_translation != "延后补上的中文"
-    page.evaluate("updatePreviews([{source:'output',utterance:'test',en:'This appears before the sentence ends',speaker:'Other'}])")
-    assert "before the sentence ends" in page.locator("#partial-rows .spoken").inner_text()
-    page.evaluate("updatePreviews([{source:'output',utterance:'test',en:'This appears before the sentence ends with more words',speaker:'Other'}])")
-    assert page.locator("#partial-rows .caption-new").last.inner_text() == " with more words"
-    page.evaluate("updatePreviews([])")
-    assert page.locator("#partial-rows article").count() == 0
+    page.evaluate("renderChinese()")
+    assert page.locator(f'#translation-scroll [data-id="{latest["id"]}"] .translation-text').inner_text() == "延后补上的中文"
+    partials.append({"source":"output", "utterance":"test", "en":"This appears before the sentence ends", "speaker":"Other"})
+    page.wait_for_function("document.querySelector('#rows article:last-child .spoken').textContent.includes('before the sentence ends')")
+    key = page.locator("#rows article").last.get_attribute("data-paragraph-key")
+    partials[0]["en"] += " with more words"
+    page.wait_for_function("document.querySelector('#rows article:last-child .spoken').textContent.endsWith('with more words')")
+    assert page.locator("#rows .caption-new").last.inner_text() == " with more words"
+    rectangle = page.locator("#rows article").last.locator(".spoken").bounding_box()
+    add(partials[0]["en"], rows[-1]["source"], gap=2)
+    rows[-1]["utterance"] = "test"
+    rows[-1]["capture_source"] = "output"
+    partials.clear()
+    page.wait_for_function("lastId===27")
+    assert page.locator("#rows article").last.get_attribute("data-paragraph-key") == key
+    assert page.locator("#rows article").last.locator(".spoken").bounding_box() == rectangle
     browser.close()
 print("Layout passed: dense rows, merge, scrolling and native overlay launch request.")

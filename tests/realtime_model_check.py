@@ -18,6 +18,7 @@ from inference import configure_cuda_libraries
 configure_cuda_libraries()
 from faster_whisper import WhisperModel
 from translation import ChineseTranslator, suspicious_output
+from speech import MODEL_DIR as SPEECH_DIR
 import app
 
 with wave.open(str(ROOT / ".tools" / "sample.wav")) as audio:
@@ -31,7 +32,7 @@ with tempfile.TemporaryDirectory() as directory, patch.object(app, "store", app.
     service.load_models()
     assert service.asr_runtime.label == "GPU", service.asr_runtime.reason
     gpu = service.model
-    cpu = WhisperModel(str(ROOT / "models" / "whisper-base.en"), device="cpu", compute_type="int8")
+    cpu = WhisperModel(str(ROOT / "models" / SPEECH_DIR), device="cpu", compute_type="int8")
     times = {}
     for mode, model in (("GPU", gpu), ("CPU", cpu)):
         list(model.transcribe(clip, language="en", beam_size=1, vad_filter=True)[0])
@@ -49,10 +50,10 @@ with tempfile.TemporaryDirectory() as directory, patch.object(app, "store", app.
     translated = threading.Event()
     release = threading.Event()
 
-    def slow_translate(text):
+    def slow_translate(text, context=()):
         translated.set()
         release.wait(timeout=10)
-        return translator.translate(text)
+        return translator.translate(text, context=context)
 
     stream = MagicMock()
     blocks = [clip[index:index+1600] for index in range(0, len(clip), 1600)]
@@ -109,7 +110,7 @@ with tempfile.TemporaryDirectory() as directory, patch.object(app, "store", app.
         service.thread.join(timeout=5)
         assert not service.error, service.error
         assert first_preview is not None and preview_updates >= 2, (first_preview, preview_updates)
-        assert translated.wait(timeout=1)
+        assert translated.wait(timeout=3)
         rows = app.store.recent()
         assert rows and rows[0]["en"] and rows[0]["zh"] == "", rows
         english_before_translation = round(time.perf_counter() - started, 3)

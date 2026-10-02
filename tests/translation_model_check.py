@@ -19,6 +19,11 @@ zh = translator.translate(text)
 assert not suspicious_output(zh, text)
 assert "师曰" not in zh and "后病卧" not in zh
 assert "传感器" in zh and "人工智能" in zh
+context = [("My phone has no battery.", "我的手机没电了。")]
+zh = translator.translate("Can I charge it here?", context=context)
+assert "充电" in zh, zh
+assert "我的手机没电了" not in zh, zh
+assert not suspicious_output(zh)
 print(
     "Real model checks passed: short fragments, Chinese vocabulary and reported example."
 )
