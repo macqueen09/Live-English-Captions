@@ -1,5 +1,6 @@
 # Live English Captions
-![Uploading image.png…]()
+<img width="1360" height="648" alt="image" src="https://github.com/user-attachments/assets/8faebb58-8a20-4a8c-a10b-0eddcd98b41e" />
+
 
 Local bilingual captions and English vocabulary learning for Windows.
 
