@@ -4,7 +4,7 @@ import threading
 import re
 import unicodedata
 from pathlib import Path
-from inference import AdaptiveModel
+from livecaptions.inference import AdaptiveModel
 
 MODEL_REPO = "JustFrederik/nllb-200-distilled-600M-ct2-int8"
 MODEL_DIR = "nllb-600m-int8"

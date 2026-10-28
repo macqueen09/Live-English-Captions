@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock
-from translation import ChineseTranslator, suspicious_output
+from livecaptions.translation import ChineseTranslator, suspicious_output
 import threading
 
 

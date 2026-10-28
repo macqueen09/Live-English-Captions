@@ -14,12 +14,12 @@ from scipy.signal import resample_poly
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from inference import configure_cuda_libraries
+from livecaptions.inference import configure_cuda_libraries
 configure_cuda_libraries()
 from faster_whisper import WhisperModel
-from translation import ChineseTranslator, suspicious_output
-from speech import MODEL_DIR as SPEECH_DIR
-import app
+from livecaptions.translation import ChineseTranslator, suspicious_output
+from livecaptions.speech import MODEL_DIR as SPEECH_DIR
+from livecaptions import app
 
 with wave.open(str(ROOT / ".tools" / "sample.wav")) as audio:
     rate = audio.getframerate()

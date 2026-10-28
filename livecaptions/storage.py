@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from translation import ENGINE
+from livecaptions.translation import ENGINE
 
 CST = timezone(timedelta(hours=8))
 

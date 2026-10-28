@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
-from inference import AdaptiveModel
+from livecaptions.inference import AdaptiveModel
 
 
 class InferenceTests(unittest.TestCase):

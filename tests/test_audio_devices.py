@@ -1,5 +1,5 @@
 import unittest
-from audio_devices import preferred_microphone
+from livecaptions.audio_devices import preferred_microphone
 
 
 class AudioDeviceTests(unittest.TestCase):

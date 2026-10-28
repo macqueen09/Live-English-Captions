@@ -1,6 +1,6 @@
 import unittest
-from streaming import StableEnglish, reconcile_groups
-from caption_layout import LiveParagraphs
+from livecaptions.streaming import StableEnglish, reconcile_groups
+from livecaptions.caption_layout import LiveParagraphs
 
 
 class StreamingTests(unittest.TestCase):

@@ -7,7 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 lock = threading.Lock()
 process = None
 
@@ -40,7 +40,7 @@ class Handler(BaseHTTPRequestHandler):
             if process is None or process.poll() is not None:
                 with (ROOT / "data" / "overlay.log").open("a", encoding="utf-8") as log:
                     process = subprocess.Popen(
-                        [sys.executable, str(ROOT / "overlay.py")],
+                        [sys.executable, "-m", "livecaptions.overlay"],
                         stdout=log,
                         stderr=log,
                         creationflags=subprocess.CREATE_NO_WINDOW,

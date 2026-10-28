@@ -6,8 +6,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from storage import Store
-from translation import ChineseTranslator, MODEL_DIR, ENGINE
+from livecaptions.storage import Store
+from livecaptions.translation import ChineseTranslator, MODEL_DIR, ENGINE
 
 root = Path(__file__).resolve().parents[1]
 store = Store(root / "data")

@@ -4,10 +4,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pathlib import Path
 from huggingface_hub import snapshot_download
 import urllib.request
-from speakers import MODEL_NAME, MODEL_URL
-from translation import MODEL_REPO, MODEL_DIR, MODEL_REVISION
-from version import VERSION
-from speech import MODEL_REPO as SPEECH_REPO, MODEL_DIR as SPEECH_DIR, MODEL_REVISION as SPEECH_REVISION
+from livecaptions.speakers import MODEL_NAME, MODEL_URL
+from livecaptions.translation import MODEL_REPO, MODEL_DIR, MODEL_REVISION
+from livecaptions.version import VERSION
+from livecaptions.speech import MODEL_REPO as SPEECH_REPO, MODEL_DIR as SPEECH_DIR, MODEL_REVISION as SPEECH_REVISION
 
 root = Path(__file__).resolve().parents[1]
 print("Downloading English speech recognition model...", flush=True)

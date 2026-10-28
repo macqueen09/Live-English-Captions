@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from storage import Store
+from livecaptions.storage import Store
 
 
 class StorageTests(unittest.TestCase):

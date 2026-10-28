@@ -29,7 +29,7 @@ Local bilingual captions and English vocabulary learning for Windows.
 6. 在「按日期回看」查看旧聊天。可以导出某一天，也可点击「导出全部对话（含人物）」一次导出所有已保存记录。导出含北京时间、会话编号、人物、英文、中文，不受实时区 12 段的限制。
 7. 「停止」立即结束捕获并处理、保存剩余英文队列；中文任务继续在后台补齐。服务独立在后台运行，关闭启动窗口或网页不会停止捕获；结束聊天时请点击「停止」。强制关机可能丢失尚未识别的音频。已保存但尚未翻译的英文在下次开始记录时恢复中文翻译。
 
-模型下载慢时，可运行 `powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Mirror`，从 `hf-mirror.com` 下载语音模型。语音和翻译模型均支持镜像选项。安装程序检测到 `nvidia-smi` 时尝试安装项目内的 CUDA 12 cuBLAS、NVRTC 和 cuDNN 9 运行库（约 1.3 GB 下载）；安装失败也能使用 CPU。已有环境可运行 `.tools\uv.exe pip install --python .venv\Scripts\python.exe -r requirements-gpu.txt` 补装，无需安装完整 CUDA Toolkit。
+模型下载慢时，可运行 `powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Mirror`，从 `hf-mirror.com` 下载语音模型。语音和翻译模型均支持镜像选项。安装程序检测到 `nvidia-smi` 时尝试安装项目内的 CUDA 12 cuBLAS、NVRTC 和 cuDNN 9 运行库（约 1.3 GB 下载）；安装失败也能使用 CPU。已有环境可运行 `.tools\uv.exe pip install --python .venv\Scripts\python.exe -r requirements/requirements-gpu.txt` 补装，无需安装完整 CUDA Toolkit。
 
 ## 行为与限制
 
@@ -49,27 +49,27 @@ Local bilingual captions and English vocabulary learning for Windows.
 
 | 文件 | 职责 |
 | --- | --- |
-| `app.py` | 本机 HTTP 服务、并行音频采集、识别翻译、设备管理和接口 |
-| `storage.py` | SQLite 历史记录、单词本、人物名称和全量导出 |
-| `translation.py` | 固定英语到简体中文、NLLB 推理与异常字符防护 |
-| `speech.py` / `streaming.py` | small.en 模型 revision、稳定前缀与可校准句尾 |
-| `caption_layout.py` / `native_view.py` | 共享段落身份、英文原位追加及原生双区增量显示 |
-| `inference.py` / `requirements-gpu.txt` | 项目内 CUDA DLL 注册、GPU 优先、模型级 CPU 回退及可选运行库版本 |
-| `version.py` / `requirements.lock` | 应用版本和固定依赖 |
+| `app.py` / `livecaptions/app.py` | 根目录启动入口 / HTTP 服务与音频处理实现 |
+| `livecaptions/storage.py` | SQLite 历史记录、单词本、人物名称和全量导出 |
+| `livecaptions/translation.py` | 固定英语到简体中文、NLLB 推理与异常字符防护 |
+| `livecaptions/speech.py` / `livecaptions/streaming.py` | small.en 模型 revision、稳定前缀与可校准句尾 |
+| `livecaptions/caption_layout.py` / `livecaptions/native_view.py` | 共享段落身份、英文原位追加及原生双区增量显示 |
+| `livecaptions/inference.py` / `requirements/requirements-gpu.txt` | 项目内 CUDA DLL 注册、GPU 优先、模型级 CPU 回退及可选运行库版本 |
+| `livecaptions/version.py` / `requirements/requirements.lock` | 应用版本和固定依赖 |
 | `scripts/retranslate_history.py` | 备份数据库并重译旧版历史 |
-| `speakers.py` | 声纹特征提取、会话内人物匹配和词级时间对齐 |
+| `livecaptions/speakers.py` | 声纹特征提取、会话内人物匹配和词级时间对齐 |
 | `web/index.html` / `web/style.css` / `web/app.js` | 字幕、历史、查词、复习及滚动跟随界面 |
 | `scripts/download_models.py` | 下载语音、翻译和声纹模型 |
 | `setup.ps1` / `launch.ps1` / `start.cmd` | 安装独立环境和启动后台服务 |
 | `create-shortcut.ps1` | 创建或更新桌面快捷方式 |
-| `overlay.py` / `overlay_launcher.py` | 原生 Tk 半透明置顶字幕窗及本机兼容启动接口（8767 端口） |
+| `livecaptions/overlay.py` / `livecaptions/overlay_launcher.py` | 原生 Tk 半透明置顶字幕窗及本机兼容启动接口（8767 端口） |
 | `tests/` | 单元测试及 Microsoft Edge 浏览器验证 |
 
 个人数据 `data/`、模型 `models/`、虚拟环境 `.venv/` 和工具缓存 `.tools/` 均被 Git 排除。仓库仅保存代码和文档。
 
-浏览器测试的可选依赖在 `requirements-dev.txt`，可运行 `.tools\uv.exe pip install --python .venv\Scripts\python.exe -r requirements-dev.txt` 安装。`tests/browser_check.py` 测试使用独立临时数据库；`tests/layout_check.py` 使用模拟字幕检查当前服务的排版和滚动行为。
+浏览器测试的可选依赖在 `requirements/requirements-dev.txt`，可运行 `.tools\uv.exe pip install --python .venv\Scripts\python.exe -r requirements/requirements-dev.txt` 安装。`tests/browser_check.py` 测试使用独立临时数据库；`tests/layout_check.py` 使用模拟字幕检查当前服务的排版和滚动行为。
 
-`setup.ps1` 使用项目内的 uv 和 Python 虚拟环境，依赖按 `requirements.lock` 固定，依赖默认从华为 PyPI 镜像安装，语音模型支持 Hugging Face 中国镜像选项。small.en 语音模型约 483 MB，声纹模型约 28 MB，翻译模型约 600 MB，另外有运行库。已有安装通过 `start.cmd` 检查并补下载新语音模型。
+`setup.ps1` 使用项目内的 uv 和 Python 虚拟环境，依赖按 `requirements/requirements.lock` 固定，依赖默认从华为 PyPI 镜像安装，语音模型支持 Hugging Face 中国镜像选项。small.en 语音模型约 483 MB，声纹模型约 28 MB，翻译模型约 600 MB，另外有运行库。已有安装通过 `start.cmd` 检查并补下载新语音模型。
 
 运行 `.venv\Scripts\python.exe -m unittest discover -s tests -v` 检查队列收尾、服务状态、持久化、分页、声纹聚类和人物导出。浏览器检查位于 `tests/browser_check.py`，需要额外安装 `playwright` 和本机 Microsoft Edge；测试使用临时数据库，不会混入个人记录。已验证英文合成语音识别/翻译、两种合成声音重复匹配，以及这台电脑的耳机和麦克风并行打开。真实多人通话的准确率仍取决于音质和说话方式。
 
@@ -96,3 +96,5 @@ NLLB 权重采用 CC-BY-NC-4.0 许可，仅适用于许可允许的用途；代�
 ## 2026-10-28 翻译稳定性修复
 
 保留短句合并，暂停 NLLB 强制历史译文前缀，避免上下文错误传播。重复中文触发独立重试，失败提示不缓存；错误详情写入服务日志。历史不重译。根目录保留启动入口、主要 Python 代码及说明，网页资源归入 `web/`，模型下载和历史维护脚本归入 `scripts/`，测试保留在 `tests/`。
+
+内部 Python 模块统一位于 `livecaptions/`，包括 `speech.py`、翻译、存储及悬浮窗；依赖锁和可选依赖位于 `requirements/`。根目录 `app.py` 仅作为稳定启动入口。模型和个人数据路径保持原样。

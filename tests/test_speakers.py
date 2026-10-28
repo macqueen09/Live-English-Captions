@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 import numpy as np
-from speakers import VoiceTracker
+from livecaptions.speakers import VoiceTracker
 
 
 class VoiceTests(unittest.TestCase):

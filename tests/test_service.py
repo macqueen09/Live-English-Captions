@@ -6,7 +6,7 @@ from unittest.mock import patch
 from unittest.mock import MagicMock
 import numpy as np
 from fastapi import HTTPException
-import app
+from livecaptions import app
 
 
 class ServiceTests(unittest.TestCase):

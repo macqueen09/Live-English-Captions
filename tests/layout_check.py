@@ -7,7 +7,7 @@ import sys
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
-from caption_layout import LiveParagraphs
+from livecaptions.caption_layout import LiveParagraphs
 layout = LiveParagraphs()
 partials = []
 start = datetime(2026, 10, 2, 20, 0, tzinfo=timezone(timedelta(hours=8)))

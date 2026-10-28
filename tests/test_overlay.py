@@ -6,7 +6,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import Mock, patch
 
-import overlay
+from livecaptions import overlay
 
 
 class OverlayTests(unittest.TestCase):

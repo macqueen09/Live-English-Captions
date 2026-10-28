@@ -7,9 +7,9 @@ import threading
 import tkinter as tk
 import urllib.request
 from datetime import datetime
-from version import VERSION
-from caption_layout import LiveParagraphs
-from native_view import NativeParagraphs, NativeChinese
+from livecaptions.version import VERSION
+from livecaptions.caption_layout import LiveParagraphs
+from livecaptions.native_view import NativeParagraphs, NativeChinese
 
 BASE = "http://127.0.0.1:8765"
 
