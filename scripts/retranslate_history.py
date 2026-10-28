@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 """Re-translate legacy captions after an atomic SQLite backup; never change English."""
 
 import sqlite3
@@ -6,7 +9,7 @@ from pathlib import Path
 from storage import Store
 from translation import ChineseTranslator, MODEL_DIR, ENGINE
 
-root = Path(__file__).resolve().parent
+root = Path(__file__).resolve().parents[1]
 store = Store(root / "data")
 with store.connect() as db:
     legacy = [

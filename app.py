@@ -1,6 +1,7 @@
 """Local-only Windows playback subtitles."""
 
 import math
+import logging
 import os
 import subprocess
 import sys
@@ -202,7 +203,12 @@ class Service:
                 try:
                     chinese = self.translate(text, context=list(recent)) if recent else self.translate(text)
                 except Exception:
-                    chinese = "［翻译暂不可用，请参考英文原文］"
+                    logging.exception("Caption translation failed for ids %s", [job.id for job in batch])
+                    try:
+                        chinese = self.translate(text)
+                    except Exception:
+                        logging.exception("Caption translation retry failed")
+                        chinese = "［翻译暂不可用，请参考英文原文］"
                 if first.session and not chinese.startswith("［"):
                     recent.append((text, chinese))
                 with self.lock:
@@ -466,17 +472,17 @@ service = Service()
 
 @app.get("/")
 def index():
-    return FileResponse(ROOT / "index.html")
+    return FileResponse(ROOT / "web" / "index.html")
 
 
 @app.get("/app.js")
 def javascript():
-    return FileResponse(ROOT / "app.js", media_type="text/javascript")
+    return FileResponse(ROOT / "web" / "app.js", media_type="text/javascript")
 
 
 @app.get("/style.css")
 def stylesheet():
-    return FileResponse(ROOT / "style.css", media_type="text/css")
+    return FileResponse(ROOT / "web" / "style.css", media_type="text/css")
 
 
 @app.get("/api/devices")
@@ -703,6 +709,9 @@ def review(word_id: int, request: ReviewRequest):
 
 
 if __name__ == "__main__":
+    import asyncio
     import uvicorn
 
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     uvicorn.run(app, host="127.0.0.1", port=8765)

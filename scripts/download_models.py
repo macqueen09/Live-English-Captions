@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pathlib import Path
 from huggingface_hub import snapshot_download
 import urllib.request
@@ -6,7 +9,7 @@ from translation import MODEL_REPO, MODEL_DIR, MODEL_REVISION
 from version import VERSION
 from speech import MODEL_REPO as SPEECH_REPO, MODEL_DIR as SPEECH_DIR, MODEL_REVISION as SPEECH_REVISION
 
-root = Path(__file__).resolve().parent
+root = Path(__file__).resolve().parents[1]
 print("Downloading English speech recognition model...", flush=True)
 snapshot_download(
     SPEECH_REPO,

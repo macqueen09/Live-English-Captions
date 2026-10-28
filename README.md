@@ -6,7 +6,7 @@ Local bilingual captions and English vocabulary learning for Windows.
 
 **当前版本：1.2.0** · [升级记录](CHANGELOG.md)
 
-1.2.0 将中文翻译升级为 NLLB 离线模型，并把字幕模式改为 Windows 原生半透明置顶窗口。旧版升级时先停止记录，运行 `powershell -ExecutionPolicy Bypass -File .\setup.ps1` 下载新模型，再启动服务。`retranslate_history.py` 可备份并修复旧版历史翻译。
+1.2.0 将中文翻译升级为 NLLB 离线模型，并把字幕模式改为 Windows 原生半透明置顶窗口。旧版升级时先停止记录，运行 `powershell -ExecutionPolicy Bypass -File .\setup.ps1` 下载新模型，再启动服务。`scripts/retranslate_history.py` 可备份并修复旧版历史翻译。
 
 ## 安装和启动
 
@@ -34,7 +34,7 @@ Local bilingual captions and English vocabulary learning for Windows.
 ## 行为与限制
 
 - 支持英语 → 简体中文。small.en 比旧版 base.en 更大，推理也更慢；口音、术语、音乐与噪声会影响准确率。
-- 中文等待完整短句或语义片段；同人物碎片最多额外等待 1.8 秒再合并翻译。最近两段相关英文及已确认中文作为有限上下文，只提取当前片段译文；上下文异常时回退单段翻译。跨会话不复用上下文，已有历史不重译。多条英文共用一段中文时，实时区只显示一次，导出标明关联字幕并保留每条英文、人物和时间。
+- 中文等待完整短句或语义片段；同人物碎片最多额外等待 1.8 秒再合并翻译。当前使用独立语义片段翻译；暂停强制携带历史译文，防止错误传播。跨会话不复用上下文，已有历史不重译。多条英文共用一段中文时，实时区只显示一次，导出标明关联字幕并保留每条英文、人物和时间。
 - 同一个输出设备上的所有声音都会被捕获，包括其他网页、提示音和游戏。建议聊天时暂停其他音频。
 - RMS 音量门限用于划分语音，Whisper VAD 进一步过滤静音。音量过小可能漏句，连续发言每 7 秒切段，边界处可能拆开单词。
 - 实际延迟取决于推理设备、音质和负载。实时预览是滚动片段重识别，后续词语可能修正句尾；最终分段仍等待约 0.6 秒静音或最长 7 秒。预览任务按音频来源合并，只保留最新快照，最终识别任务优先处理。最终队列最多保留 64 段，积压满时停止捕获并显示错误，避免静默丢弃旧音频。导出覆盖全部已识别、保存的文字；不能保证声音过小、重叠发言等情况下每个词都被识别。
@@ -56,10 +56,10 @@ Local bilingual captions and English vocabulary learning for Windows.
 | `caption_layout.py` / `native_view.py` | 共享段落身份、英文原位追加及原生双区增量显示 |
 | `inference.py` / `requirements-gpu.txt` | 项目内 CUDA DLL 注册、GPU 优先、模型级 CPU 回退及可选运行库版本 |
 | `version.py` / `requirements.lock` | 应用版本和固定依赖 |
-| `retranslate_history.py` | 备份数据库并重译旧版历史 |
+| `scripts/retranslate_history.py` | 备份数据库并重译旧版历史 |
 | `speakers.py` | 声纹特征提取、会话内人物匹配和词级时间对齐 |
-| `index.html` / `style.css` / `app.js` | 字幕、历史、查词、复习及滚动跟随界面 |
-| `download_models.py` | 下载语音、翻译和声纹模型 |
+| `web/index.html` / `web/style.css` / `web/app.js` | 字幕、历史、查词、复习及滚动跟随界面 |
+| `scripts/download_models.py` | 下载语音、翻译和声纹模型 |
 | `setup.ps1` / `launch.ps1` / `start.cmd` | 安装独立环境和启动后台服务 |
 | `create-shortcut.ps1` | 创建或更新桌面快捷方式 |
 | `overlay.py` / `overlay_launcher.py` | 原生 Tk 半透明置顶字幕窗及本机兼容启动接口（8767 端口） |
@@ -83,7 +83,7 @@ Local bilingual captions and English vocabulary learning for Windows.
 
 悬浮窗中选择英文单词或短语会打开独立翻译窗口，点击「单独翻译」获取中文释义，然后可点击「保存到生词本」。保存内容与网页个人单词本共用本地数据库，并保留原句；只有点击保存才写入。
 
-Whisper `small.en` 使用 CTranslate2 GPU `float16` 推理；NLLB-200 600M 使用 `int8_float16`，失败时分别回退 `int8` CPU。英文通过滚动快照重识别、两次一致的前缀确认和短句尾修正提供预览，在完整片段识别后定稿；中文只翻译最终文本，并使用有限上下文和已确认译文前缀提取当前译文。此实现不属于模型原生逐词流式识别，也不承诺固定延迟。稳定前缀只保护读过的文字，不能保证已确认词语绝对正确；长段落仍需自然换行，最终人物分段可能移动新出现的句尾。
+Whisper `small.en` 使用 CTranslate2 GPU `float16` 推理；NLLB-200 600M 使用 `int8_float16`，失败时分别回退 `int8` CPU。英文通过滚动快照重识别、两次一致的前缀确认和短句尾修正提供预览，在完整片段识别后定稿；中文只翻译最终文本，不再强制使用历史译文前缀。此实现不属于模型原生逐词流式识别，也不承诺固定延迟。稳定前缀只保护读过的文字，不能保证已确认词语绝对正确；长段落仍需自然换行，最终人物分段可能移动新出现的句尾。
 
 可选真实模型验证：`.venv\Scripts\python.exe tests\realtime_model_check.py`，需要 `.tools/sample.wav` 英文 PCM WAV 测试样本。脚本使用临时数据库，比较预热后的 CPU/GPU 识别耗时，并按正常语速模拟采集，验证英文预览和中文延后补齐；不会播放音频或写入个人记录。
 
@@ -91,4 +91,8 @@ Whisper `small.en` 使用 CTranslate2 GPU `float16` 推理；NLLB-200 600M 使�
 
 NLLB 权重采用 CC-BY-NC-4.0 许可，仅适用于许可允许的用途；代码仓库不附带模型权重。参见官方模型页。
 
-真实模型回归：`.venv\Scripts\python.exe tests\translation_model_check.py`。历史重译：先停止记录，运行 `.venv\Scripts\python.exe retranslate_history.py`；原数据库备份保存在 `data/backups/`。
+真实模型回归：`.venv\Scripts\python.exe tests\translation_model_check.py`。历史重译：先停止记录，运行 `.venv\Scripts\python.exe scripts/retranslate_history.py`；原数据库备份保存在 `data/backups/`。
+
+## 2026-10-28 翻译稳定性修复
+
+保留短句合并，暂停 NLLB 强制历史译文前缀，避免上下文错误传播。重复中文触发独立重试，失败提示不缓存；错误详情写入服务日志。历史不重译。根目录保留启动入口、主要 Python 代码及说明，网页资源归入 `web/`，模型下载和历史维护脚本归入 `scripts/`，测试保留在 `tests/`。

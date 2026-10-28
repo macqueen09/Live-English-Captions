@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory() as folder:
     env = dict(os.environ, SUBTITLES_DATA_DIR=folder, PYTHONIOENCODING="utf-8")
     with open(root / ".tools" / "browser-server.log", "w", encoding="utf-8") as log:
         process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "app:app", "--port", "8766"],
+            [sys.executable, "-c", "import asyncio; asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy()); import uvicorn; uvicorn.run('app:app', port=8766)"],
             cwd=root,
             env=env,
             stdout=log,

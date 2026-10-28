@@ -19,6 +19,6 @@ if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
     if ($LASTEXITCODE -ne 0) { Write-Warning 'NVIDIA runtime installation failed; captions will use CPU fallback.' }
 }
 if ($Mirror) { $env:HF_ENDPOINT = 'https://hf-mirror.com'; $env:HF_HUB_DISABLE_XET = '1' }
-& '.\.venv\Scripts\python.exe' download_models.py
+& '.\.venv\Scripts\python.exe' scripts/download_models.py
 if ($LASTEXITCODE -ne 0) { throw 'Model download failed. Check network and run setup again.' }
 Write-Host 'Ready. Double-click start.cmd to open subtitles.'

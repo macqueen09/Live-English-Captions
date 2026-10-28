@@ -1,6 +1,7 @@
 """Offline NLLB English → Simplified Chinese, with explicit language tokens."""
 
 import threading
+import re
 import unicodedata
 from pathlib import Path
 from inference import AdaptiveModel
@@ -13,6 +14,9 @@ ENGINE = "nllb-600m-int8-v1"
 
 def suspicious_output(text, source=""):
     if not text.strip():
+        return True
+    compact = re.sub(r"[\s，。！？,.!?]", "", text)
+    if re.search(r"(.{2,16})\1{3,}", compact):
         return True
     for char in text:
         category = unicodedata.category(char)
@@ -46,6 +50,10 @@ class ChineseTranslator:
         self.cache = {}
 
     def infer(self, text, beam=4, context=()):
+        # NLLB is a sentence translator, not a document/instruction model.
+        # Forcing previous translations can consume the decoding budget and
+        # propagate bad output. Translate the already-batched current fragment.
+        context = ()
         # The converted tokenizer's default postprocessor contains <unk> as its
         # source language. Never use it: supply explicit English and Chinese tags.
         tokens = self.tokenizer.encode(text, add_special_tokens=False).tokens
@@ -56,39 +64,23 @@ class ChineseTranslator:
             if split <= 0:
                 split = middle
             return self.translate(text[:split]) + " " + self.translate(text[split:])
-        # Short source context and its already-confirmed translation form a forced
-        # target prefix. Decode only the new suffix; no delimiter guessing or LLM instructions.
-        context_tokens, prefix_tokens = [], []
-        for english, chinese in reversed(context[-2:]):
-            source_piece = self.tokenizer.encode(english + " ", add_special_tokens=False).tokens
-            target_piece = self.tokenizer.encode(chinese + " ", add_special_tokens=False).tokens
-            if len(source_piece) + len(context_tokens) + len(tokens) > 440 or len(target_piece) + len(prefix_tokens) > 180:
-                break
-            context_tokens = source_piece + context_tokens
-            prefix_tokens = target_piece + prefix_tokens
-        source = ["eng_Latn", *context_tokens, *tokens, "</s>"]
-        target_prefix = ["zho_Hans", *prefix_tokens]
+        source = ["eng_Latn", *tokens, "</s>"]
+        target_prefix = ["zho_Hans"]
         result = self.runtime.run(lambda model: model.translate_batch(
             [source],
             target_prefix=[target_prefix],
             beam_size=beam,
-            max_decoding_length=512,
+            max_decoding_length=min(512, max(64, len(tokens) * 3)),
             repetition_penalty=1.1,
             return_scores=True,
         )[0])
         target = result.hypotheses[0]
-        if prefix_tokens:
-            if target[:len(target_prefix)] != target_prefix:
-                return self.infer(text, beam=beam)
-            target = target[len(target_prefix):]
         ids = [self.tokenizer.token_to_id(token) for token in target]
         if any(token is None for token in ids):
             raise RuntimeError("翻译模型词表不一致，请重新安装模型。")
         translated = unicodedata.normalize(
             "NFC", self.tokenizer.decode(ids, skip_special_tokens=True)
         ).strip()
-        if prefix_tokens and (not translated or suspicious_output(translated, text)):
-            return self.infer(text, beam=beam)
         return translated
 
     def translate(self, text, context=()):
@@ -102,11 +94,12 @@ class ChineseTranslator:
                 return self.cache[key]
             translated = self.infer(text, context=context)
             if suspicious_output(translated, text):
-                translated = self.infer(text, beam=6, context=context)
+                translated = self.infer(text, beam=6, context=())
             if suspicious_output(translated, text):
                 # Do not erase invalid characters and disguise broken output as a translation.
                 translated = "［译文异常，请参考英文原文］"
             if len(self.cache) >= 500:
                 self.cache.pop(next(iter(self.cache)))
-            self.cache[key] = translated
+            if not translated.startswith("［"):
+                self.cache[key] = translated
             return translated

@@ -5,6 +5,11 @@ import threading
 
 
 class TranslationTests(unittest.TestCase):
+    def test_repeated_chinese_is_retried_and_failure_is_not_cached(self):
+        t = self.translator(["你好你好你好你好你好", "\ufffd", "你好"])
+        self.assertEqual(t.translate("Hello"), "［译文异常，请参考英文原文］")
+        self.assertEqual(t.translate("Hello"), "你好")
+
     def test_rejects_private_use_and_wrong_script_without_erasing_them(self):
         self.assertTrue(suspicious_output("и\ue0f6獺", "I believe"))
         self.assertTrue(suspicious_output("你好\ufffd"))
